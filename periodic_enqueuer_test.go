@@ -11,7 +11,7 @@ import (
 
 func TestPeriodicEnqueuer(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	var pjs []*periodicJob
@@ -99,7 +99,7 @@ func TestPeriodicEnqueuer(t *testing.T) {
 
 func TestPeriodicEnqueuerSpawn(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	pe := newPeriodicEnqueuer(ns, pool, nil)

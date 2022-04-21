@@ -4,8 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"reflect"
 )
+
+// JobOptions can be passed to JobWithOptions.
+type JobOptions struct {
+	IsBatch        bool              // If true, the job is LIVY batch session job
+	Priority       uint              // Priority from 1 to 10000
+	MaxFails       uint              // 1: send straight to dead (unless SkipDead)
+	SkipDead       bool              // If true, don't send failed jobs to the dead queue when retries are exhausted.
+	MaxConcurrency uint              // Max number of jobs to keep in flight (default is 0, meaning no max)
+	Backoff        BackoffCalculator // If not set, uses the default backoff algorithm
+}
 
 // Job represents a job.
 type Job struct {
@@ -180,4 +191,10 @@ func missingKeyError(jsonType, key string) error {
 func typecastError(jsonType, key string, v interface{}) error {
 	actualType := reflect.TypeOf(v)
 	return fmt.Errorf("looking for a %s in job.Arg[%s] but value wasn't right type: %v(%v)", jsonType, key, actualType, v)
+}
+
+// Default algorithm returns an fastly increasing backoff counter which grows in an unbounded fashion
+func defaultBackoffCalculator(job *Job) int64 {
+	fails := job.Fails
+	return (fails * fails * fails * fails) + 15 + (rand.Int63n(30) * (fails + 1))
 }

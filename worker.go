@@ -2,7 +2,6 @@ package work
 
 import (
 	"fmt"
-	"math/rand"
 	"reflect"
 	"time"
 
@@ -14,6 +13,7 @@ const fetchKeysPerJobType = 6
 type worker struct {
 	workerID      string
 	poolID        string
+	groupID       string
 	namespace     string
 	pool          *redis.Pool
 	jobTypes      map[string]*jobType
@@ -32,8 +32,8 @@ type worker struct {
 	doneDrainingChan chan struct{}
 }
 
-func newWorker(namespace string, poolID string, pool *redis.Pool, contextType reflect.Type, middleware []*middlewareHandler, jobTypes map[string]*jobType, sleepBackoffs []int64) *worker {
-	workerID := makeIdentifier()
+func newWorker(namespace, poolID, groupID string, pool *redis.Pool, contextType reflect.Type, sleepBackoffs []int64) *worker {
+	workerID := makeIdentifier(IdentifierTypeWorker)
 	ob := newObserver(namespace, pool, workerID)
 
 	if len(sleepBackoffs) == 0 {
@@ -43,6 +43,7 @@ func newWorker(namespace string, poolID string, pool *redis.Pool, contextType re
 	w := &worker{
 		workerID:      workerID,
 		poolID:        poolID,
+		groupID:       groupID,
 		namespace:     namespace,
 		pool:          pool,
 		contextType:   contextType,
@@ -56,9 +57,6 @@ func newWorker(namespace string, poolID string, pool *redis.Pool, contextType re
 		drainChan:        make(chan struct{}),
 		doneDrainingChan: make(chan struct{}),
 	}
-
-	w.updateMiddlewareAndJobTypes(middleware, jobTypes)
-
 	return w
 }
 
@@ -69,7 +67,7 @@ func (w *worker) updateMiddlewareAndJobTypes(middleware []*middlewareHandler, jo
 	for _, jt := range jobTypes {
 		sampler.add(jt.Priority,
 			redisKeyJobs(w.namespace, jt.Name),
-			redisKeyJobsInProgress(w.namespace, w.poolID, jt.Name),
+			redisKeyJobsInProgress(w.namespace, w.groupID, jt.Name),
 			redisKeyJobsPaused(w.namespace, jt.Name),
 			redisKeyJobsLock(w.namespace, jt.Name),
 			redisKeyJobsLockInfo(w.namespace, jt.Name),
@@ -151,7 +149,7 @@ func (w *worker) fetchJob() (*Job, error) {
 	for _, s := range w.sampler.samples {
 		scriptArgs = append(scriptArgs, s.redisJobs, s.redisJobsInProg, s.redisJobsPaused, s.redisJobsLock, s.redisJobsLockInfo, s.redisJobsMaxConcurrency) // KEYS[1-6 * N]
 	}
-	scriptArgs = append(scriptArgs, w.poolID) // ARGV[1]
+	scriptArgs = append(scriptArgs, w.groupID) // ARGV[1]
 	conn := w.pool.Get()
 	defer conn.Close()
 
@@ -271,7 +269,7 @@ func (w *worker) removeJobFromInProgress(job *Job, fate terminateOp) {
 	conn.Send("MULTI")
 	conn.Send("LREM", job.inProgQueue, 1, job.rawJSON)
 	conn.Send("DECR", redisKeyJobsLock(w.namespace, job.Name))
-	conn.Send("HINCRBY", redisKeyJobsLockInfo(w.namespace, job.Name), w.poolID, -1)
+	conn.Send("HINCRBY", redisKeyJobsLockInfo(w.namespace, job.Name), w.groupID, -1)
 	fate(conn)
 	if _, err := conn.Do("EXEC"); err != nil {
 		logError("worker.remove_job_from_in_progress.lrem", err)
@@ -318,10 +316,4 @@ func (w *worker) jobFate(jt *jobType, job *Job) terminateOp {
 		}
 	}
 	return terminateAndDead(w, job)
-}
-
-// Default algorithm returns an fastly increasing backoff counter which grows in an unbounded fashion
-func defaultBackoffCalculator(job *Job) int64 {
-	fails := job.Fails
-	return (fails * fails * fails * fails) + 15 + (rand.Int63n(30) * (fails + 1))
 }

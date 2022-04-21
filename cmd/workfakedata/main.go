@@ -11,7 +11,6 @@ import (
 )
 
 var redisHostPort = flag.String("redis", ":6379", "redis hostport")
-var redisNamespace = flag.String("ns", "work", "redis namespace")
 
 func epsilonHandler(job *work.Job) error {
 	fmt.Println("epsilon")
@@ -30,18 +29,18 @@ func main() {
 	fmt.Println("Installing some fake data")
 
 	pool := newPool(*redisHostPort)
-	cleanKeyspace(pool, *redisNamespace)
+	cleanKeyspace(pool, work.WorkerPoolNamespace)
 
 	// Enqueue some jobs:
 	go func() {
 		conn := pool.Get()
 		defer conn.Close()
-		conn.Do("SADD", *redisNamespace+":known_jobs", "foobar")
+		conn.Do("SADD", work.WorkerPoolNamespace+":known_jobs", "foobar")
 	}()
 
 	go func() {
 		for {
-			en := work.NewEnqueuer(*redisNamespace, pool)
+			en := work.NewEnqueuer(work.WorkerPoolNamespace, pool)
 			for i := 0; i < 20; i++ {
 				en.Enqueue("foobar", work.Q{"i": i})
 			}
@@ -50,7 +49,8 @@ func main() {
 		}
 	}()
 
-	wp := work.NewWorkerPool(context{}, 5, *redisNamespace, pool)
+	configuration := work.InitConfig("live")
+	wp := work.NewWorkerPool(context{}, *configuration.Spark.Executor, pool)
 	wp.Job("foobar", epsilonHandler)
 	wp.Start()
 

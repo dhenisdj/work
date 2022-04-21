@@ -10,7 +10,7 @@ import (
 
 func TestObserverStarted(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 
 	tMock := int64(1425263401)
 	setNowEpochSecondsMock(tMock)
@@ -32,7 +32,7 @@ func TestObserverStarted(t *testing.T) {
 
 func TestObserverStartedDone(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 
 	tMock := int64(1425263401)
 	setNowEpochSecondsMock(tMock)
@@ -51,7 +51,7 @@ func TestObserverStartedDone(t *testing.T) {
 
 func TestObserverCheckin(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 
 	observer := newObserver(ns, pool, "abcd")
 	observer.start()
@@ -78,7 +78,7 @@ func TestObserverCheckin(t *testing.T) {
 
 func TestObserverCheckinFromJob(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 
 	observer := newObserver(ns, pool, "abcd")
 	observer.start()

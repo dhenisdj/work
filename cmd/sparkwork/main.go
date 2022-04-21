@@ -27,34 +27,27 @@ type context struct{}
 
 func main() {
 	flag.Parse()
-	fmt.Println("Installing some fake data")
+	fmt.Println("Starting fetcher pool and worker pool")
 
 	pool := newPool(*redisHostPort)
-	cleanKeyspace(pool, *redisNamespace)
+	cleanKeyspace(pool, work.WorkerPoolNamespace)
 
-	// Enqueue some jobs:
-	go func() {
-		conn := pool.Get()
-		defer conn.Close()
-		conn.Do("SADD", *redisNamespace+":known_jobs", "foobar")
-	}()
+	env := "test_ph"
+	//executor := "FilterAudienceUsers"
+	//businessGroup := "crm"
 
-	go func() {
-		for {
-			en := work.NewEnqueuer(*redisNamespace, pool)
-			for i := 0; i < 20; i++ {
-				en.Enqueue("foobar", work.Q{"i": i})
-			}
+	// Initialization for configuration
+	configuration := work.InitConfig(env)
 
-			time.Sleep(1 * time.Second)
-		}
-	}()
+	// Build Fetcher and Fetch
+	fp := work.NewFetcherPool(context{}, configuration, pool)
+	fp.Start(work.URIInternalTaskPoll)
 
-	wp := work.NewWorkerPool(context{}, 5, *redisNamespace, pool)
-	wp.Job("foobar", epsilonHandler)
-	wp.Start()
+	//wp := work.NewWorkerPool(context{}, *configuration.Spark.Executor, pool)
+	//wp.Start()
 
 	select {}
+
 }
 
 func newPool(addr string) *redis.Pool {

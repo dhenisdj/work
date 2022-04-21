@@ -12,7 +12,6 @@ import (
 )
 
 var redisHostPort = flag.String("redis", ":6379", "redis hostport")
-var redisNamespace = flag.String("ns", "work", "redis namespace")
 var jobName = flag.String("job", "", "job name")
 var jobArgs = flag.String("args", "{}", "job arguments")
 
@@ -33,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	en := work.NewEnqueuer(*redisNamespace, pool)
+	en := work.NewEnqueuer(work.WorkerPoolNamespace, pool)
 	en.Enqueue(*jobName, args)
 }
 

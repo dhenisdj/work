@@ -11,7 +11,7 @@ import (
 
 func TestEnqueue(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 	enqueuer := NewEnqueuer(ns, pool)
 	job, err := enqueuer.Enqueue("wat", Q{"a": 1, "b": "cool"})
@@ -53,7 +53,7 @@ func TestEnqueue(t *testing.T) {
 
 func TestEnqueueIn(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 	enqueuer := NewEnqueuer(ns, pool)
 
@@ -100,7 +100,7 @@ func TestEnqueueIn(t *testing.T) {
 
 func TestEnqueueUnique(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 	enqueuer := NewEnqueuer(ns, pool)
 	var mutex = &sync.Mutex{}
@@ -138,7 +138,8 @@ func TestEnqueueUnique(t *testing.T) {
 
 	// Process the queues. Ensure the right number of jobs were processed
 	var wats, taws int64
-	wp := NewWorkerPool(TestContext{}, 3, ns, pool)
+	configuration := InitConfig("test")
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.JobWithOptions("wat", JobOptions{Priority: 1, MaxFails: 1}, func(job *Job) error {
 		mutex.Lock()
 		wats++
@@ -176,7 +177,7 @@ func TestEnqueueUnique(t *testing.T) {
 
 func TestEnqueueUniqueIn(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 	enqueuer := NewEnqueuer(ns, pool)
 
@@ -236,7 +237,7 @@ func TestEnqueueUniqueByKey(t *testing.T) {
 	var arg4 string
 
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 	enqueuer := NewEnqueuer(ns, pool)
 	var mutex = &sync.Mutex{}
@@ -266,7 +267,8 @@ func TestEnqueueUniqueByKey(t *testing.T) {
 
 	// Process the queues. Ensure the right number of jobs were processed
 	var wats, taws int64
-	wp := NewWorkerPool(TestContext{}, 3, ns, pool)
+	configuration := InitConfig("test")
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.JobWithOptions("wat", JobOptions{Priority: 1, MaxFails: 1}, func(job *Job) error {
 		mutex.Lock()
 		argA := job.Args["a"].(float64)
@@ -317,7 +319,7 @@ func TestEnqueueUniqueByKey(t *testing.T) {
 
 func EnqueueUniqueInByKey(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 	enqueuer := NewEnqueuer(ns, pool)
 

@@ -16,7 +16,7 @@ import (
 
 func TestWebUIStartStop(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	s := NewServer(ns, pool, ":6666")
@@ -28,8 +28,9 @@ type TestContext struct{}
 
 func TestWebUIQueues(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := work.InitConfig("test")
 
 	// Get some stuff to to show up in the jobs:
 	enqueuer := work.NewEnqueuer(ns, pool)
@@ -40,7 +41,7 @@ func TestWebUIQueues(t *testing.T) {
 
 	// Start a pool to work on it. It's going to work on the queues
 	// side effect of that is knowing which jobs are avail
-	wp := work.NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *work.Job) error {
 		return nil
 	})
@@ -84,16 +85,17 @@ func TestWebUIQueues(t *testing.T) {
 
 func TestWebUIWorkerPools(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := work.InitConfig("test")
 
-	wp := work.NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *work.Job) error { return nil })
 	wp.Job("bob", func(job *work.Job) error { return nil })
 	wp.Start()
 	defer wp.Stop()
 
-	wp2 := work.NewWorkerPool(TestContext{}, 11, ns, pool)
+	wp2 := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp2.Job("foo", func(job *work.Job) error { return nil })
 	wp2.Job("bar", func(job *work.Job) error { return nil })
 	wp2.Start()
@@ -122,15 +124,16 @@ func TestWebUIWorkerPools(t *testing.T) {
 
 func TestWebUIBusyWorkers(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := work.InitConfig("test")
 
 	// Keep a job in the in-progress state without using sleeps
 	wgroup := sync.WaitGroup{}
 	wgroup2 := sync.WaitGroup{}
 	wgroup2.Add(1)
 
-	wp := work.NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *work.Job) error {
 		wgroup2.Done()
 		wgroup.Wait()
@@ -139,7 +142,7 @@ func TestWebUIBusyWorkers(t *testing.T) {
 	wp.Start()
 	defer wp.Stop()
 
-	wp2 := work.NewWorkerPool(TestContext{}, 11, ns, pool)
+	wp2 := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp2.Start()
 	defer wp2.Stop()
 
@@ -184,14 +187,15 @@ func TestWebUIBusyWorkers(t *testing.T) {
 
 func TestWebUIRetryJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := work.InitConfig("test")
 
 	enqueuer := work.NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
 	assert.Nil(t, err)
 
-	wp := work.NewWorkerPool(TestContext{}, 2, ns, pool)
+	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *work.Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -227,7 +231,7 @@ func TestWebUIRetryJobs(t *testing.T) {
 
 func TestWebUIScheduledJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	enqueuer := work.NewEnqueuer(ns, pool)
@@ -260,15 +264,16 @@ func TestWebUIScheduledJobs(t *testing.T) {
 
 func TestWebUIDeadJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := work.InitConfig("test")
 
 	enqueuer := work.NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
 	_, err = enqueuer.Enqueue("wat", nil)
 	assert.Nil(t, err)
 
-	wp := work.NewWorkerPool(TestContext{}, 2, ns, pool)
+	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.JobWithOptions("wat", work.JobOptions{Priority: 1, MaxFails: 1}, func(job *work.Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -348,15 +353,16 @@ func TestWebUIDeadJobs(t *testing.T) {
 
 func TestWebUIDeadJobsDeleteRetryAll(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := work.WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := work.InitConfig("test")
 
 	enqueuer := work.NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
 	_, err = enqueuer.Enqueue("wat", nil)
 	assert.Nil(t, err)
 
-	wp := work.NewWorkerPool(TestContext{}, 2, ns, pool)
+	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.JobWithOptions("wat", work.JobOptions{Priority: 1, MaxFails: 1}, func(job *work.Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -449,7 +455,7 @@ func TestWebUIDeadJobsDeleteRetryAll(t *testing.T) {
 
 func TestWebUIAssets(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := work.WorkerPoolNamespace
 	s := NewServer(ns, pool, ":6666")
 
 	recorder := httptest.NewRecorder()

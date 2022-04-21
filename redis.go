@@ -52,8 +52,16 @@ func redisKeyWorkerPools(namespace string) string {
 	return redisNamespacePrefix(namespace) + "worker_pools"
 }
 
+func redisKeyPools(namespace, kind string) string {
+	return redisNamespacePrefix(namespace) + fmt.Sprintf("pools:%s", kind)
+}
+
 func redisKeyHeartbeat(namespace, workerPoolID string) string {
 	return redisNamespacePrefix(namespace) + "worker_pools:" + workerPoolID
+}
+
+func redisKeyHeartbeats(namespace, kind, poolID string) string {
+	return redisNamespacePrefix(namespace) + fmt.Sprintf("pools:%s:%s", kind, poolID)
 }
 
 func redisKeyJobsPaused(namespace, jobName string) string {

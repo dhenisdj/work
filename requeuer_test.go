@@ -8,7 +8,7 @@ import (
 
 func TestRequeue(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	tMock := nowEpochSeconds() - 10
@@ -51,7 +51,7 @@ func TestRequeue(t *testing.T) {
 
 func TestRequeueUnknown(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	tMock := nowEpochSeconds() - 10

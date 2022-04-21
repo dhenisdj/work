@@ -9,33 +9,31 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-const (
-	beatPeriod = 5 * time.Second
-)
-
-type workerPoolHeartbeater struct {
-	workerPoolID string
-	namespace    string // eg, "myapp-work"
-	pool         *redis.Pool
-	beatPeriod   time.Duration
-	concurrency  uint
-	jobNames     string
-	startedAt    int64
-	pid          int
-	hostname     string
-	workerIDs    string
+type poolHeartbeater struct {
+	poolID         string        // Pool identifier
+	namespace      string        // Namespace for redis for now eg, "am"
+	pool           *redis.Pool   // Redis pool
+	beatPeriod     time.Duration // Heartbeat duration
+	totalCurrency  int           // Total concurrency for the whole pool
+	concurrencyMap []byte        // Json format {"name":concurrency}
+	jobNames       string        // String format for all job names separate by ,
+	startedAt      int64         // Timestamp for this heartbeat
+	pid            int           // Process id
+	hostname       string        // Host name
+	executorIDs    string        // All ids for the executor eg, fetcherIDs workerIDs
 
 	stopChan         chan struct{}
 	doneStoppingChan chan struct{}
 }
 
-func newWorkerPoolHeartbeater(namespace string, pool *redis.Pool, workerPoolID string, jobTypes map[string]*jobType, concurrency uint, workerIDs []string) *workerPoolHeartbeater {
-	h := &workerPoolHeartbeater{
-		workerPoolID:     workerPoolID,
+func newPoolHeartbeater(namespace, poolID string, totalCurrency int, pool *redis.Pool, jobTypes map[string]*jobType, concurrencyMap []byte, ids []string) *poolHeartbeater {
+	h := &poolHeartbeater{
+		poolID:           poolID,
 		namespace:        namespace,
+		totalCurrency:    totalCurrency,
 		pool:             pool,
-		beatPeriod:       beatPeriod,
-		concurrency:      concurrency,
+		beatPeriod:       HeartbeatPeriod,
+		concurrencyMap:   concurrencyMap,
 		stopChan:         make(chan struct{}),
 		doneStoppingChan: make(chan struct{}),
 	}
@@ -47,8 +45,8 @@ func newWorkerPoolHeartbeater(namespace string, pool *redis.Pool, workerPoolID s
 	sort.Strings(jobNames)
 	h.jobNames = strings.Join(jobNames, ",")
 
-	sort.Strings(workerIDs)
-	h.workerIDs = strings.Join(workerIDs, ",")
+	sort.Strings(ids)
+	h.executorIDs = strings.Join(ids, ",")
 
 	h.pid = os.Getpid()
 	host, err := os.Hostname()
@@ -61,45 +59,45 @@ func newWorkerPoolHeartbeater(namespace string, pool *redis.Pool, workerPoolID s
 	return h
 }
 
-func (h *workerPoolHeartbeater) start() {
-	go h.loop()
+func (h *poolHeartbeater) start(kind string) {
+	go h.loop(kind)
 }
 
-func (h *workerPoolHeartbeater) stop() {
+func (h *poolHeartbeater) stop() {
 	h.stopChan <- struct{}{}
 	<-h.doneStoppingChan
 }
 
-func (h *workerPoolHeartbeater) loop() {
+func (h *poolHeartbeater) loop(kind string) {
 	h.startedAt = nowEpochSeconds()
-	h.heartbeat() // do it right away
+	h.heartbeat(kind) // do it right away
 	ticker := time.Tick(h.beatPeriod)
 	for {
 		select {
 		case <-h.stopChan:
-			h.removeHeartbeat()
+			h.removeHeartbeat(kind)
 			h.doneStoppingChan <- struct{}{}
 			return
 		case <-ticker:
-			h.heartbeat()
+			h.heartbeat(kind)
 		}
 	}
 }
 
-func (h *workerPoolHeartbeater) heartbeat() {
+func (h *poolHeartbeater) heartbeat(kind string) {
 	conn := h.pool.Get()
 	defer conn.Close()
 
-	workerPoolsKey := redisKeyWorkerPools(h.namespace)
-	heartbeatKey := redisKeyHeartbeat(h.namespace, h.workerPoolID)
+	poolsKey := redisKeyPools(h.namespace, kind)
+	heartbeatKey := redisKeyHeartbeats(h.namespace, kind, h.poolID)
 
-	conn.Send("SADD", workerPoolsKey, h.workerPoolID)
+	conn.Send("SADD", poolsKey, h.poolID)
 	conn.Send("HMSET", heartbeatKey,
 		"heartbeat_at", nowEpochSeconds(),
 		"started_at", h.startedAt,
 		"job_names", h.jobNames,
-		"concurrency", h.concurrency,
-		"worker_ids", h.workerIDs,
+		"concurrences", h.concurrencyMap,
+		"ids", h.executorIDs,
 		"host", h.hostname,
 		"pid", h.pid,
 	)
@@ -109,14 +107,14 @@ func (h *workerPoolHeartbeater) heartbeat() {
 	}
 }
 
-func (h *workerPoolHeartbeater) removeHeartbeat() {
+func (h *poolHeartbeater) removeHeartbeat(kind string) {
 	conn := h.pool.Get()
 	defer conn.Close()
 
-	workerPoolsKey := redisKeyWorkerPools(h.namespace)
-	heartbeatKey := redisKeyHeartbeat(h.namespace, h.workerPoolID)
+	poolsKey := redisKeyPools(h.namespace, kind)
+	heartbeatKey := redisKeyHeartbeats(h.namespace, kind, h.poolID)
 
-	conn.Send("SREM", workerPoolsKey, h.workerPoolID)
+	conn.Send("SREM", poolsKey, h.poolID)
 	conn.Send("DEL", heartbeatKey)
 
 	if err := conn.Flush(); err != nil {

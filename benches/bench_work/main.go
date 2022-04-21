@@ -39,7 +39,8 @@ func main() {
 	enqueueJobs(jobNames, 10000)
 	job.Complete(health.Success)
 
-	workerPool := work.NewWorkerPool(context{}, 20, namespace, pool)
+	configuration := work.InitConfig("test")
+	workerPool := work.NewWorkerPool(context{}, *configuration.Spark.Executor, pool)
 	for _, jobName := range jobNames {
 		workerPool.Job(jobName, epsilonHandler)
 	}

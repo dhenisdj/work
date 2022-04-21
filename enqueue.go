@@ -1,6 +1,7 @@
 package work
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -35,12 +36,37 @@ func NewEnqueuer(namespace string, pool *redis.Pool) *Enqueuer {
 	}
 }
 
+func (e *Enqueuer) enqueue(job *Job) *Job {
+	var runErr error
+	jobName := job.Name
+	rawJSON, err := job.serialize()
+	if err != nil {
+		runErr = fmt.Errorf("serialize job to raw json error")
+		logError("enqueue job ", runErr)
+	}
+
+	conn := e.Pool.Get()
+	defer conn.Close()
+
+	if _, err := conn.Do("LPUSH", e.queuePrefix+jobName, rawJSON); err != nil {
+		runErr = fmt.Errorf("lpush job to redis error")
+		logError("enqueue job ", runErr)
+	}
+
+	if err := e.addToKnownJobs(conn, jobName); err != nil {
+		runErr = fmt.Errorf("add to known jobs error")
+		logError("enqueue job ", runErr)
+	}
+
+	return job
+}
+
 // Enqueue will enqueue the specified job name and arguments. The args param can be nil if no args ar needed.
 // Example: e.Enqueue("send_email", work.Q{"addr": "test@example.com"})
 func (e *Enqueuer) Enqueue(jobName string, args map[string]interface{}) (*Job, error) {
 	job := &Job{
 		Name:       jobName,
-		ID:         makeIdentifier(),
+		ID:         makeIdentifier(IdentifierTypeEnqueuer),
 		EnqueuedAt: nowEpochSeconds(),
 		Args:       args,
 	}
@@ -68,7 +94,7 @@ func (e *Enqueuer) Enqueue(jobName string, args map[string]interface{}) (*Job, e
 func (e *Enqueuer) EnqueueIn(jobName string, secondsFromNow int64, args map[string]interface{}) (*ScheduledJob, error) {
 	job := &Job{
 		Name:       jobName,
-		ID:         makeIdentifier(),
+		ID:         makeIdentifier(IdentifierTypeEnqueuer),
 		EnqueuedAt: nowEpochSeconds(),
 		Args:       args,
 	}
@@ -195,7 +221,7 @@ func (e *Enqueuer) uniqueJobHelper(jobName string, args map[string]interface{}, 
 
 	job := &Job{
 		Name:       jobName,
-		ID:         makeIdentifier(),
+		ID:         makeIdentifier(IdentifierTypeEnqueuer),
 		EnqueuedAt: nowEpochSeconds(),
 		Args:       args,
 		Unique:     true,

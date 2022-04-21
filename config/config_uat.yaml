@@ -1,0 +1,254 @@
+s3:
+  host: s3.i.test.sz.shopee.io
+  accessKey: RDB70A2ZWNEEKJ9IY7TK
+  secretKey: 2JQg5b9KNsOmBZrHHcqZjzCqFTyOZFmqVf1RzgkB
+  bucket: audiencemanager
+
+kafka:
+  brokers:
+    - kafka-public-test-01.sg2.i.sz.shopee.io:9092
+    - kafka-public-test-02.sg2.i.sz.shopee.io:9092
+    - kafka-public-test-03.sg2.i.sz.shopee.io:9092
+  topic: audience_manager_data_uat_sg
+  metaTopic: audience_manager_task_meta_test
+
+crm:
+  credential:
+    key: crm_am_appkey
+    secret: 0bb7c048e0d84dee9eef05e92fdabf29
+  callback:
+    id: https://mkt-admin.uat.shopee.co.id
+    th: https://mkt-admin.uat.shopee.co.th
+    my: https://mkt-admin.uat.shopee.com.my
+    br: https://mkt-admin.uat.shopee.com.br
+    vn: https://mkt-admin.uat.shopee.vn
+    sg: https://mkt-admin.uat.shopee.sg
+    tw: https://mkt-admin.uat.shopee.tw
+    ph: https://mkt-admin.uat.shopee.ph
+    mx: https://mkt-admin.uat.shopee.com.mx
+    co: https://mkt-admin.uat.shopee.com.co
+    cl: https://mkt-admin.uat.shopee.cl
+    pl: https://mkt-admin.uat.shopee.pl
+    es: https://mkt-admin.uat.shopee.es
+    fr: https://mkt-admin.uat.shopee.fr
+    in: https://mkt-admin.uat.shopee.in
+    xx: https://mkt-admin.uat.shopee.systems
+
+am:
+  callback:
+    sg: https://audience.uat.shopee.io/am/adminapi
+  credential:
+    key: am_appkey
+    secret: 9709819e6ae87536afab3d8f1ebf76b5
+  schema:
+    crm: staging_sztoc_audiencemanager
+    om: staging_opa_audiencemanager_om
+    ads_ops: staging_opa_audiencemanager_ads
+    referral: staging_opa_audiencemanager_ads
+    crm_attr: staging_opa_audiencemanager_crm_attr
+  hdfs:
+    crm: /projects/sztoc_audiencemanager/hdfs/stag/am
+    om: /projects/opa_audiencemanager_om/hdfs/stag/am
+    ads_ops: /projects/opa_audiencemanager_ads/hdfs/stag/am
+    referral: /projects/opa_audiencemanager_ads/hdfs/stag/am
+    crm_attr: /projects/opa_audiencemanager_crm_attr/hdfs/udf
+
+airflow:
+  seatalk: https://openapi.seatalk.io/webhook/group/n8tu6rsWQrmQ0VA_XsOXag
+
+spark:
+  jars:
+    - hdfs://R2/projects/sztoc_audiencemanager/jars/aws-java-sdk-bundle-1.11.375.jar
+    - hdfs://R2/projects/sztoc_audiencemanager/jars/hadoop-aws-3.2.0-sdi-001.jar
+  pyFiles:
+    - hdfs://R2/projects/sztoc_audiencemanager/executable/uat/sg/amengine-0.1-py3.9.egg
+  archives:
+    - hdfs://R2/projects/sztoc_audiencemanager/python/env/am_py_39.tar.gz#env
+  conf: |-
+    {
+      "spark.sql.files.mergeSmallFile.enabled": "true",
+      "spark.sql.files.mergeSmallFile.maxBytes": "1073742000",
+      "spark.pyspark.python": "./env/bin/python",
+      "spark.yarn.appMasterEnv.PYSPARK_PYTHON": "./env/bin/python",
+      "spark.yarn.appMasterEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
+      "spark.executorEnv.PYSPARK_PYTHON": "./env/bin/python",
+      "spark.executorEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
+      "spark.dynamicAllocation.enabled": "false"
+    }
+  executor:
+    FilterAudienceUsers:
+      name: FilterAudienceUsers
+      type: single
+      business:
+        validate:
+          - ads_ops
+          - crm
+          - om
+        account:
+          ads_ops:
+            name: staging_opa_audiencemanager_ads
+            password: Fg5XY4WE5hoF
+          crm:
+            name: staging_sztoc_audiencemanager
+            password: SdKWIYBvo6tT
+          om:
+            name: staging_opa_audiencemanager_om
+            password: NrQnLsK89RjO
+        concurrency:
+          ads_ops: 2
+          crm: 2
+          om: 2
+        queue:
+          ads_ops: szopam-test
+          crm: szopam-test
+          om: szopam-test
+      resource:
+        driverMemory: 6g
+        driverCores: 1
+        executorMemory: 6g
+        executorCores: 1
+        numExecutor: 20
+    SyncDistributionCrm:
+      name: SyncDistributionCrm
+      type: single
+      business:
+        validate:
+          - crm
+        account:
+          crm:
+            name: ""
+            password: ""
+        concurrency:
+          crm: 1
+        queue:
+          crm: szopam-test
+      resource:
+        driverMemory: 6g
+        driverCores: 1
+        executorMemory: 5g
+        executorCores: 1
+        numExecutor: 20
+    DistributeIncrCalc:
+      name: DistributeIncrCalc
+      type: single
+      business:
+        validate:
+          - ads_ops
+          - crm
+          - om
+        account:
+          ads_ops:
+            name: staging_opa_audiencemanager_ads
+            password: Fg5XY4WE5hoF
+          crm:
+            name: staging_sztoc_audiencemanager
+            password: SdKWIYBvo6tT
+          om:
+            name: staging_opa_audiencemanager_om
+            password: NrQnLsK89RjO
+        concurrency:
+          ads_ops: 1
+          crm: 1
+          om: 1
+        queue:
+          ads_ops: szopam-test
+          crm: szopam-test
+          om: szopam-test
+      resource:
+        driverMemory: 6g
+        driverCores: 1
+        executorMemory: 8g
+        executorCores: 1
+        numExecutor: 20
+    SyncDistributionCommon:
+      name: SyncDistributionCommon
+      type: single
+      business:
+        validate:
+          - ads_ops
+        account:
+          ads_ops:
+            name: staging_opa_audiencemanager_ads
+            password: Fg5XY4WE5hoF
+        concurrency:
+          ads_ops: 1
+        queue:
+          ads_ops: szopam-test
+      resource:
+        driverMemory: 6g
+        driverCores: 1
+        executorMemory: 8g
+        executorCores: 1
+        numExecutor: 20
+    MergeFiles:
+      name: MergeFiles
+      type: single
+      business:
+        validate:
+          - ads_ops
+          - crm
+          - om
+        account:
+          ads_ops:
+            name: staging_opa_audiencemanager_ads
+            password: Fg5XY4WE5hoF
+          crm:
+            name: staging_sztoc_audiencemanager
+            password: SdKWIYBvo6tT
+          om:
+            name: staging_opa_audiencemanager_om
+            password: NrQnLsK89RjO
+        concurrency:
+          ads_ops: 2
+          crm: 2
+          om: 2
+        queue:
+          ads_ops: szopam-test
+          crm: szopam-test
+          om: szopam-test
+      resource:
+        driverMemory: 6g
+        driverCores: 1
+        executorMemory: 1g
+        executorCores: 2
+        numExecutor: 2
+    UpdateAttribute:
+      name: UpdateAttribute
+      type: single
+      business:
+        validate:
+          - crm
+        account:
+          crm:
+            name: staging_opa_audiencemanager_crm_attr
+            password: x4mvSV6RMa4A
+        concurrency:
+          crm: 1
+        queue:
+          crm: szopam-test
+      resource:
+        driverMemory: 6g
+        driverCores: 1
+        executorMemory: 6g
+        executorCores: 2
+        numExecutor: 20
+    SyncAudienceRecordHive:
+      name: SyncAudienceRecordHive
+      type: single
+      business:
+        validate:
+          - crm
+        account:
+          crm:
+            name: staging_sztoc_audiencemanager
+            password: SdKWIYBvo6tT
+        concurrency:
+          crm: 1
+        queue:
+          crm: szopam-test
+      resource:
+        driverMemory: 6g
+        driverCores: 1
+        executorMemory: 8g
+        executorCores: 2
+        numExecutor: 20

@@ -13,15 +13,16 @@ type TestContext struct{}
 
 func TestClientWorkerPoolHeartbeats(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := InitConfig("test")
 
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *Job) error { return nil })
 	wp.Job("bob", func(job *Job) error { return nil })
 	wp.Start()
 
-	wp2 := NewWorkerPool(TestContext{}, 11, ns, pool)
+	wp2 := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp2.Job("foo", func(job *Job) error { return nil })
 	wp2.Job("bar", func(job *Job) error { return nil })
 	wp2.Start()
@@ -36,7 +37,7 @@ func TestClientWorkerPoolHeartbeats(t *testing.T) {
 	if len(hbs) == 2 {
 		var hbwp, hbwp2 *WorkerPoolHeartbeat
 
-		if wp.workerPoolID == hbs[0].WorkerPoolID {
+		if wp.poolID == hbs[0].WorkerPoolID {
 			hbwp = hbs[0]
 			hbwp2 = hbs[1]
 		} else {
@@ -44,12 +45,12 @@ func TestClientWorkerPoolHeartbeats(t *testing.T) {
 			hbwp2 = hbs[0]
 		}
 
-		assert.Equal(t, wp.workerPoolID, hbwp.WorkerPoolID)
+		assert.Equal(t, wp.poolID, hbwp.WorkerPoolID)
 		assert.EqualValues(t, uint(10), hbwp.Concurrency)
 		assert.Equal(t, []string{"bob", "wat"}, hbwp.JobNames)
 		assert.Equal(t, wp.workerIDs(), hbwp.WorkerIDs)
 
-		assert.Equal(t, wp2.workerPoolID, hbwp2.WorkerPoolID)
+		assert.Equal(t, wp2.poolID, hbwp2.WorkerPoolID)
 		assert.EqualValues(t, uint(11), hbwp2.Concurrency)
 		assert.Equal(t, []string{"bar", "foo"}, hbwp2.JobNames)
 		assert.Equal(t, wp2.workerIDs(), hbwp2.WorkerIDs)
@@ -65,8 +66,9 @@ func TestClientWorkerPoolHeartbeats(t *testing.T) {
 
 func TestClientWorkerObservations(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := InitConfig("test")
 
 	enqueuer := NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", Q{"a": 1, "b": 2})
@@ -74,7 +76,7 @@ func TestClientWorkerObservations(t *testing.T) {
 	_, err = enqueuer.Enqueue("foo", Q{"a": 3, "b": 4})
 	assert.Nil(t, err)
 
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *Job) error {
 		time.Sleep(50 * time.Millisecond)
 		return nil
@@ -134,8 +136,9 @@ func TestClientWorkerObservations(t *testing.T) {
 
 func TestClientQueues(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := InitConfig("test")
 
 	enqueuer := NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
@@ -144,7 +147,7 @@ func TestClientQueues(t *testing.T) {
 
 	// Start a pool to work on it. It's going to work on the queues
 	// side effect of that is knowing which jobs are avail
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *Job) error {
 		return nil
 	})
@@ -185,7 +188,7 @@ func TestClientQueues(t *testing.T) {
 
 func TestClientScheduledJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	enqueuer := NewEnqueuer(ns, pool)
@@ -233,8 +236,9 @@ func TestClientScheduledJobs(t *testing.T) {
 
 func TestClientRetryJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := InitConfig("test")
 
 	setNowEpochSecondsMock(1425263409)
 	defer resetNowEpochSecondsMock()
@@ -245,7 +249,7 @@ func TestClientRetryJobs(t *testing.T) {
 
 	setNowEpochSecondsMock(1425263429)
 
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -272,8 +276,9 @@ func TestClientRetryJobs(t *testing.T) {
 
 func TestClientDeadJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := InitConfig("test")
 
 	setNowEpochSecondsMock(1425263409)
 	defer resetNowEpochSecondsMock()
@@ -284,7 +289,7 @@ func TestClientDeadJobs(t *testing.T) {
 
 	setNowEpochSecondsMock(1425263429)
 
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.JobWithOptions("wat", JobOptions{Priority: 1, MaxFails: 1}, func(job *Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -327,7 +332,7 @@ func TestClientDeadJobs(t *testing.T) {
 
 func TestClientDeleteDeadJob(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	// Insert a dead job:
@@ -356,7 +361,7 @@ func TestClientDeleteDeadJob(t *testing.T) {
 
 func TestClientRetryDeadJob(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	// Insert a dead job:
@@ -412,7 +417,7 @@ func TestClientRetryDeadJob(t *testing.T) {
 
 func TestClientRetryDeadJobWithArgs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	// Enqueue a job with arguments
@@ -421,7 +426,7 @@ func TestClientRetryDeadJobWithArgs(t *testing.T) {
 	failAt := int64(12347)
 	job := &Job{
 		Name:       name,
-		ID:         makeIdentifier(),
+		ID:         makeIdentifier("test"),
 		EnqueuedAt: encAt,
 		Args:       map[string]interface{}{"a": "wat"},
 		Fails:      3,
@@ -456,7 +461,7 @@ func TestClientRetryDeadJobWithArgs(t *testing.T) {
 
 func TestClientDeleteAllDeadJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	// Insert a dead job:
@@ -482,7 +487,7 @@ func TestClientDeleteAllDeadJobs(t *testing.T) {
 
 func TestClientRetryAllDeadJobs(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	setNowEpochSecondsMock(1425263409)
@@ -540,7 +545,7 @@ func TestClientRetryAllDeadJobs(t *testing.T) {
 
 func TestClientRetryAllDeadJobsBig(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	conn := pool.Get()
@@ -552,7 +557,7 @@ func TestClientRetryAllDeadJobsBig(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		job := &Job{
 			Name:       "wat1",
-			ID:         makeIdentifier(),
+			ID:         makeIdentifier("test"),
 			EnqueuedAt: 12345,
 			Args:       nil,
 			Fails:      3,
@@ -573,7 +578,7 @@ func TestClientRetryAllDeadJobsBig(t *testing.T) {
 	// Add a dead job with a non-existent queue:
 	job := &Job{
 		Name:       "dontexist",
-		ID:         makeIdentifier(),
+		ID:         makeIdentifier("test"),
 		EnqueuedAt: 12345,
 		Args:       nil,
 		Fails:      3,
@@ -609,7 +614,7 @@ func TestClientRetryAllDeadJobsBig(t *testing.T) {
 
 func TestClientDeleteScheduledJob(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	// Delete an invalid job. Make sure we get error
@@ -630,7 +635,7 @@ func TestClientDeleteScheduledJob(t *testing.T) {
 
 func TestClientDeleteScheduledUniqueJob(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
 
 	// Schedule a unique job. Delete it. Ensure we can schedule it again.
@@ -651,8 +656,9 @@ func TestClientDeleteScheduledUniqueJob(t *testing.T) {
 
 func TestClientDeleteRetryJob(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "testwork"
+	ns := WorkerPoolNamespace
 	cleanKeyspace(ns, pool)
+	configuration := InitConfig("test")
 
 	setNowEpochSecondsMock(1425263409)
 	defer resetNowEpochSecondsMock()
@@ -663,7 +669,7 @@ func TestClientDeleteRetryJob(t *testing.T) {
 
 	setNowEpochSecondsMock(1425263429)
 
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Job("wat", func(job *Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -686,7 +692,7 @@ func TestClientDeleteRetryJob(t *testing.T) {
 func insertDeadJob(ns string, pool *redis.Pool, name string, encAt, failAt int64) *Job {
 	job := &Job{
 		Name:       name,
-		ID:         makeIdentifier(),
+		ID:         makeIdentifier("test"),
 		EnqueuedAt: encAt,
 		Args:       nil,
 		Fails:      3,

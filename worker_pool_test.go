@@ -73,9 +73,9 @@ func TestWorkerPoolMiddlewareValidations(t *testing.T) {
 }
 
 func TestWorkerPoolStartStop(t *testing.T) {
+	configuration := InitConfig("test")
 	pool := newTestPool(":6379")
-	ns := "work"
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.Start()
 	wp.Start()
 	wp.Stop()
@@ -85,9 +85,9 @@ func TestWorkerPoolStartStop(t *testing.T) {
 }
 
 func TestWorkerPoolValidations(t *testing.T) {
+	configuration := InitConfig("test")
 	pool := newTestPool(":6379")
-	ns := "work"
-	wp := NewWorkerPool(TestContext{}, 10, ns, pool)
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 
 	func() {
 		defer func() {
@@ -116,10 +116,10 @@ func TestWorkerPoolValidations(t *testing.T) {
 
 func TestWorkersPoolRunSingleThreaded(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 	job1 := "job1"
-	numJobs, concurrency, sleepTime := 5, 5, 2
-	wp := setupTestWorkerPool(pool, ns, job1, concurrency, JobOptions{Priority: 1, MaxConcurrency: 1})
+	numJobs, sleepTime := 5, 2
+	wp := setupTestWorkerPool(pool, ns, job1, JobOptions{Priority: 1, MaxConcurrency: 1})
 	wp.Start()
 	// enqueue some jobs
 	enqueuer := NewEnqueuer(ns, pool)
@@ -138,12 +138,12 @@ func TestWorkersPoolRunSingleThreaded(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	for time.Since(start) < totalRuntime {
 		// jobs in progress, lock count for the job and lock info for the pool should never exceed 1
-		jobsInProgress := listSize(pool, redisKeyJobsInProgress(ns, wp.workerPoolID, job1))
+		jobsInProgress := listSize(pool, redisKeyJobsInProgress(ns, wp.poolID, job1))
 		assert.True(t, jobsInProgress <= 1, "jobsInProgress should never exceed 1: actual=%d", jobsInProgress)
 
 		jobLockCount := getInt64(pool, redisKeyJobsLock(ns, job1))
 		assert.True(t, jobLockCount <= 1, "global lock count for job should never exceed 1, got: %v", jobLockCount)
-		wpLockCount := hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.workerPoolID)
+		wpLockCount := hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.poolID)
 		assert.True(t, wpLockCount <= 1, "lock count for the worker pool should never exceed 1: actual=%v", wpLockCount)
 		time.Sleep(time.Duration(sleepTime) * time.Millisecond)
 	}
@@ -152,16 +152,16 @@ func TestWorkersPoolRunSingleThreaded(t *testing.T) {
 
 	// At this point it should all be empty.
 	assert.EqualValues(t, 0, listSize(pool, redisKeyJobs(ns, job1)))
-	assert.EqualValues(t, 0, listSize(pool, redisKeyJobsInProgress(ns, wp.workerPoolID, job1)))
+	assert.EqualValues(t, 0, listSize(pool, redisKeyJobsInProgress(ns, wp.poolID, job1)))
 	assert.EqualValues(t, 0, getInt64(pool, redisKeyJobsLock(ns, job1)))
-	assert.EqualValues(t, 0, hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.workerPoolID))
+	assert.EqualValues(t, 0, hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.poolID))
 }
 
 func TestWorkerPoolPauseSingleThreadedJobs(t *testing.T) {
 	pool := newTestPool(":6379")
 	ns, job1 := "work", "job1"
-	numJobs, concurrency, sleepTime := 5, 5, 2
-	wp := setupTestWorkerPool(pool, ns, job1, concurrency, JobOptions{Priority: 1, MaxConcurrency: 1})
+	numJobs, sleepTime := 5, 2
+	wp := setupTestWorkerPool(pool, ns, job1, JobOptions{Priority: 1, MaxConcurrency: 1})
 	wp.Start()
 	// enqueue some jobs
 	enqueuer := NewEnqueuer(ns, pool)
@@ -185,10 +185,10 @@ func TestWorkerPoolPauseSingleThreadedJobs(t *testing.T) {
 	start := time.Now()
 	totalRuntime := time.Duration(sleepTime*numJobs) * time.Millisecond
 	for time.Since(start) < totalRuntime {
-		assert.EqualValues(t, 0, listSize(pool, redisKeyJobsInProgress(ns, wp.workerPoolID, job1)))
+		assert.EqualValues(t, 0, listSize(pool, redisKeyJobsInProgress(ns, wp.poolID, job1)))
 		// lock count for the job and lock info for the pool should both be at 1 while job is running
 		assert.EqualValues(t, 0, getInt64(pool, redisKeyJobsLock(ns, job1)))
-		assert.EqualValues(t, 0, hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.workerPoolID))
+		assert.EqualValues(t, 0, hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.poolID))
 		time.Sleep(time.Duration(sleepTime) * time.Millisecond)
 	}
 
@@ -201,9 +201,9 @@ func TestWorkerPoolPauseSingleThreadedJobs(t *testing.T) {
 
 	// At this point it should all be empty.
 	assert.EqualValues(t, 0, listSize(pool, redisKeyJobs(ns, job1)))
-	assert.EqualValues(t, 0, listSize(pool, redisKeyJobsInProgress(ns, wp.workerPoolID, job1)))
+	assert.EqualValues(t, 0, listSize(pool, redisKeyJobsInProgress(ns, wp.poolID, job1)))
 	assert.EqualValues(t, 0, getInt64(pool, redisKeyJobsLock(ns, job1)))
-	assert.EqualValues(t, 0, hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.workerPoolID))
+	assert.EqualValues(t, 0, hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.poolID))
 }
 
 // Test Helpers
@@ -213,12 +213,12 @@ func (t *TestContext) SleepyJob(job *Job) error {
 	return nil
 }
 
-func setupTestWorkerPool(pool *redis.Pool, namespace, jobName string, concurrency int, jobOpts JobOptions) *WorkerPool {
+func setupTestWorkerPool(pool *redis.Pool, namespace, jobName string, jobOpts JobOptions) *WorkerPool {
 	deleteQueue(pool, namespace, jobName)
 	deleteRetryAndDead(pool, namespace)
 	deletePausedAndLockedKeys(namespace, jobName, pool)
-
-	wp := NewWorkerPool(TestContext{}, uint(concurrency), namespace, pool)
+	configuration := InitConfig("test")
+	wp := NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp.JobWithOptions(jobName, jobOpts, (*TestContext).SleepyJob)
 	// reset the backoff times to help with testing
 	sleepBackoffsInMilliseconds = []int64{10, 10, 10, 10, 10}

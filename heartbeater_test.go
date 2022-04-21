@@ -1,6 +1,7 @@
 package work
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 
 func TestHeartbeater(t *testing.T) {
 	pool := newTestPool(":6379")
-	ns := "work"
+	ns := WorkerPoolNamespace
 
 	tMock := int64(1425263409)
 	setNowEpochSecondsMock(tMock)
@@ -20,9 +21,15 @@ func TestHeartbeater(t *testing.T) {
 		"foo": nil,
 		"bar": nil,
 	}
+	concurrences, _ := json.Marshal(map[string]int{
+		"foo": 10,
+		"bar": 10,
+	})
 
-	heart := newWorkerPoolHeartbeater(ns, pool, "abcd", jobTypes, 10, []string{"ccc", "bbb"})
-	heart.start()
+	totalConcurrency := 20
+
+	heart := newPoolHeartbeater(ns, "abcd", totalConcurrency, pool, jobTypes, concurrences, []string{"ccc", "bbb"})
+	heart.start("test")
 
 	time.Sleep(20 * time.Millisecond)
 
