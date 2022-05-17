@@ -4,22 +4,24 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/dhenisdj/scheduler/component/actors/enqueue"
+	context "github.com/dhenisdj/scheduler/component/common/context"
+	"github.com/dhenisdj/scheduler/config"
 	"os"
 	"time"
 
-	"github.com/gocraft/work"
 	"github.com/gomodule/redigo/redis"
 )
 
-var redisHostPort = flag.String("redis", ":6379", "redis hostport")
-var jobName = flag.String("job", "", "job name")
-var jobArgs = flag.String("args", "{}", "job arguments")
+var redisHostPort = flag.String("redi", ":6379", "redi hostport")
+var jobName = flag.String("task", "", "task name")
+var jobArgs = flag.String("args", "{}", "task arguments")
 
 func main() {
 	flag.Parse()
 
 	if *jobName == "" {
-		fmt.Println("no job specified")
+		fmt.Println("no task specified")
 		os.Exit(1)
 	}
 
@@ -32,7 +34,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	en := work.NewEnqueuer(work.WorkerPoolNamespace, pool)
+	en := enqueue.NewEnqueuer(context.New(), config.SchedulerNamespace, "", "", pool)
 	en.Enqueue(*jobName, args)
 }
 
@@ -47,10 +49,10 @@ func newPool(addr string) *redis.Pool {
 				return nil, err
 			}
 			return c, nil
-			//return redis.NewLoggingConn(c, log.New(os.Stdout, "", 0), "redis"), err
+			//return redi.NewLoggingConn(c, log.New(os.Stdout, "", 0), "redi"), err
 		},
 		Wait: true,
-		//TestOnBorrow: func(c redis.Conn, t time.Time) error {
+		//TestOnBorrow: func(c redi.Conn, t time.Time) error {
 		//	_, err := c.Do("PING")
 		//	return err
 		//},

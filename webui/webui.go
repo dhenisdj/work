@@ -3,14 +3,15 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dhenisdj/scheduler/client"
+	context "github.com/dhenisdj/scheduler/component/common/context"
 	"net/http"
 	"strconv"
 	"sync"
 
 	"github.com/braintree/manners"
+	"github.com/dhenisdj/scheduler/webui/internal/assets"
 	"github.com/gocraft/web"
-	"github.com/gocraft/work"
-	"github.com/gocraft/work/webui/internal/assets"
 	"github.com/gomodule/redigo/redis"
 )
 
@@ -18,7 +19,7 @@ import (
 type Server struct {
 	namespace string
 	pool      *redis.Pool
-	client    *work.Client
+	client    *client.Client
 	hostPort  string
 	server    *manners.GracefulServer
 	wg        sync.WaitGroup
@@ -29,13 +30,13 @@ type context struct {
 	*Server
 }
 
-// NewServer creates and returns a new server. The 'namespace' param is the redis namespace to use. The hostPort param is the address to bind on to expose the API.
+// NewServer creates and returns a new server. The 'namespace' param is the redi namespace to use. The hostPort param is the address to bind on to expose the API.
 func NewServer(namespace string, pool *redis.Pool, hostPort string) *Server {
 	router := web.New(context{})
 	server := &Server{
 		namespace: namespace,
 		pool:      pool,
-		client:    work.NewClient(namespace, pool),
+		client:    client.NewClient(context.New(), namespace, pool),
 		hostPort:  hostPort,
 		server:    manners.NewWithServer(&http.Server{Addr: hostPort, Handler: router}),
 		router:    router,
@@ -108,7 +109,7 @@ func (c *context) busyWorkers(rw web.ResponseWriter, r *web.Request) {
 		return
 	}
 
-	var busyObservations []*work.WorkerObservation
+	var busyObservations []*client.WorkerObservation
 	for _, ob := range observations {
 		if ob.IsBusy {
 			busyObservations = append(busyObservations, ob)
@@ -132,8 +133,8 @@ func (c *context) retryJobs(rw web.ResponseWriter, r *web.Request) {
 	}
 
 	response := struct {
-		Count int64            `json:"count"`
-		Jobs  []*work.RetryJob `json:"jobs"`
+		Count int64              `json:"count"`
+		Jobs  []*client.RetryJob `json:"jobs"`
 	}{Count: count, Jobs: jobs}
 
 	render(rw, response, err)
@@ -153,8 +154,8 @@ func (c *context) scheduledJobs(rw web.ResponseWriter, r *web.Request) {
 	}
 
 	response := struct {
-		Count int64                `json:"count"`
-		Jobs  []*work.ScheduledJob `json:"jobs"`
+		Count int64                  `json:"count"`
+		Jobs  []*client.ScheduledJob `json:"jobs"`
 	}{Count: count, Jobs: jobs}
 
 	render(rw, response, err)
@@ -174,8 +175,8 @@ func (c *context) deadJobs(rw web.ResponseWriter, r *web.Request) {
 	}
 
 	response := struct {
-		Count int64           `json:"count"`
-		Jobs  []*work.DeadJob `json:"jobs"`
+		Count int64             `json:"count"`
+		Jobs  []*client.DeadJob `json:"jobs"`
 	}{Count: count, Jobs: jobs}
 
 	render(rw, response, err)

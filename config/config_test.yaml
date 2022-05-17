@@ -66,11 +66,17 @@ spark:
   jars:
     - hdfs://R2/projects/sztoc_audiencemanager/jars/aws-java-sdk-bundle-1.11.375.jar
     - hdfs://R2/projects/sztoc_audiencemanager/jars/hadoop-aws-3.2.0-sdi-001.jar
+  file: hdfs://R2/projects/sztoc_audiencemanager/executable/test/%s/run_app.py
+  args:
+    - --app
+    - am_sync_analytical_ma
+    - --env
+    - test
   pyFiles:
     - hdfs://R2/projects/sztoc_audiencemanager/executable/test/%s/amengine-0.1-py3.9.egg
   archives:
     - hdfs://R2/projects/sztoc_audiencemanager/python/env/am_py_39.tar.gz#env
-  conf: |-
+  sparkConf: |-
     {
       "spark.sql.files.mergeSmallFile.enabled": "true",
       "spark.sql.files.mergeSmallFile.maxBytes": "1073742000",
@@ -81,10 +87,23 @@ spark:
       "spark.executorEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
       "spark.dynamicAllocation.enabled": "false"
     }
+  hiveConf: |-
+    {
+      "livy.session.conf.spark.sql.files.mergeSmallFile.enabled": "true",
+      "livy.session.conf.spark.sql.files.mergeSmallFile.maxBytes": "1073742000",
+      "livy.session.conf.spark.pyspark.python": "./env/bin/python",
+      "livy.session.conf.spark.yarn.appMasterEnv.PYSPARK_PYTHON": "./env/bin/python",
+      "livy.session.conf.spark.yarn.appMasterEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
+      "livy.session.conf.spark.executorEnv.PYSPARK_PYTHON": "./env/bin/python",
+      "livy.session.conf.spark.executorEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
+      "livy.session.conf.spark.dynamicAllocation.enabled": "false"
+    }
   executor:
     FilterAudienceUsers:
       name: FilterAudienceUsers
-      type: single
+      session:
+        isBatch: false
+        renewIntervalSeconds: 0
       business:
         validate:
           - ads_ops
@@ -113,10 +132,12 @@ spark:
         driverCores: 1
         executorMemory: 6g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     SyncDistributionCrm:
       name: SyncDistributionCrm
-      type: single
+      session:
+        isBatch: false
+        renewIntervalSeconds: 0
       business:
         validate:
           - crm
@@ -133,10 +154,12 @@ spark:
         driverCores: 1
         executorMemory: 5g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     DistributeIncrCalc:
       name: DistributeIncrCalc
-      type: single
+      session:
+        isBatch: false
+        renewIntervalSeconds: 0
       business:
         validate:
           - ads_ops
@@ -165,10 +188,12 @@ spark:
         driverCores: 1
         executorMemory: 8g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     SyncDistributionCommon:
       name: SyncDistributionCommon
-      type: single
+      session:
+        isBatch: false
+        renewIntervalSeconds: 0
       business:
         validate:
           - ads_ops
@@ -185,10 +210,12 @@ spark:
         driverCores: 1
         executorMemory: 8g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     MergeFiles:
       name: MergeFiles
-      type: single
+      session:
+        isBatch: false
+        renewIntervalSeconds: 0
       business:
         validate:
           - ads_ops
@@ -217,10 +244,12 @@ spark:
         driverCores: 1
         executorMemory: 1g
         executorCores: 1
-        numExecutor: 2
+        numExecutors: 2
     UpdateAttribute:
       name: UpdateAttribute
-      type: single
+      session:
+        isBatch: false
+        renewIntervalSeconds: 0 # session will be closed after 1 hour idle
       business:
         validate:
           - crm
@@ -237,10 +266,14 @@ spark:
         driverCores: 1
         executorMemory: 6g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     SyncAudienceRecordHive:
       name: SyncAudienceRecordHive
-      type: single
+      session:
+        isBatch: false
+        renewIntervalSeconds: 0
+        hiveConf:
+
       business:
         validate:
           - crm
@@ -257,4 +290,4 @@ spark:
         driverCores: 1
         executorMemory: 8g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20

@@ -1,4 +1,4 @@
-# gocraft/work [![GoDoc](https://godoc.org/github.com/gocraft/work?status.png)](https://godoc.org/github.com/gocraft/work)
+# gocraft/work [![GoDoc](https://godoc.org/github.com/dhenisdj/scheduler?status.png)](https://godoc.org/github.com/dhenisdj/scheduler)
 
 gocraft/work lets you enqueue and processes background jobs in Go. Jobs are durable and backed by Redis. Very similar to Sidekiq for Go.
 
@@ -21,7 +21,7 @@ package main
 
 import (
 	"github.com/gomodule/redigo/redis"
-	"github.com/gocraft/work"
+	"github.com/dhenisdj/scheduler"
 )
 
 // Make a redis pool
@@ -38,7 +38,7 @@ var redisPool = &redis.Pool{
 var enqueuer = work.NewEnqueuer("my_app_namespace", redisPool)
 
 func main() {
-	// Enqueue a job named "send_email" with the specified parameters.
+	// Enqueue a task named "send_email" with the specified parameters.
 	_, err := enqueuer.Enqueue("send_email", work.Q{"address": "test@example.com", "subject": "hello world", "customer_id": 4})
 	if err != nil {
 		log.Fatal(err)
@@ -57,7 +57,7 @@ package main
 
 import (
 	"github.com/gomodule/redigo/redis"
-	"github.com/gocraft/work"
+	"github.com/dhenisdj/scheduler"
 	"os"
 	"os/signal"
 )
@@ -84,7 +84,7 @@ func main() {
 	// redisPool is a Redis pool
 	pool := work.NewWorkerPool(Context{}, 10, "my_app_namespace", redisPool)
 
-	// Add middleware that will be executed for each job
+	// Add middleware that will be executed for each task
 	pool.Middleware((*Context).Log)
 	pool.Middleware((*Context).FindCustomer)
 
@@ -107,7 +107,7 @@ func main() {
 }
 
 func (c *Context) Log(job *work.Job, next work.NextMiddlewareFunc) error {
-	fmt.Println("Starting job: ", job.Name)
+	fmt.Println("Starting task: ", job.Name)
 	return next()
 }
 
@@ -143,7 +143,7 @@ func (c *Context) Export(job *work.Job) error {
 ```
 
 ## Redis Cluster
-If you're attempting to use gocraft/work on a `Redis Cluster` deployment, then you may encounter a `CROSSSLOT Keys in request don't hash to the same slot` error during the execution of the various lua scripts used to manage job data (see [Issue 93](https://github.com/gocraft/work/issues/93#issuecomment-401134340)). The current workaround is to force the keys for an entire `namespace` for a given worker pool on a single node in the cluster using [Redis Hash Tags](https://redis.io/topics/cluster-spec#keys-hash-tags). Using the example above:
+If you're attempting to use gocraft/work on a `Redis Cluster` deployment, then you may encounter a `CROSSSLOT Keys in request don't hash to the same slot` error during the execution of the various lua scripts used to manage job data (see [Issue 93](https://github.com/dhenisdj/scheduler/issues/93#issuecomment-401134340)). The current workaround is to force the keys for an entire `namespace` for a given worker pool on a single node in the cluster using [Redis Hash Tags](https://redis.io/topics/cluster-spec#keys-hash-tags). Using the example above:
 
 ```go
 func main() {
@@ -206,9 +206,9 @@ You can enqueue unique jobs so that only one job with a given name/arguments exi
 
 ```go
 enqueuer := work.NewEnqueuer("my_app_namespace", redisPool)
-job, err := enqueuer.EnqueueUnique("clear_cache", work.Q{"object_id_": "123"}) // job returned
-job, err = enqueuer.EnqueueUnique("clear_cache", work.Q{"object_id_": "123"}) // job == nil -- this duplicate job isn't enqueued.
-job, err = enqueuer.EnqueueUniqueIn("clear_cache", 300, work.Q{"object_id_": "789"}) // job != nil (diff id)
+job, err := enqueuer.EnqueueUnique("clear_cache", work.Q{"object_id_": "123"}) // task returned
+job, err = enqueuer.EnqueueUnique("clear_cache", work.Q{"object_id_": "123"}) // task == nil -- this duplicate task isn't enqueued.
+job, err = enqueuer.EnqueueUniqueIn("clear_cache", 300, work.Q{"object_id_": "789"}) // task != nil (diff id)
 ```
 
 Alternatively, you can provide your own key for making a job unique. When another job is enqueued with the same key as a job already in the queue, it will simply update the arguments.
@@ -225,8 +225,8 @@ You can periodically enqueue jobs on your gocraft/work cluster using your worker
 
 ```go
 pool := work.NewWorkerPool(Context{}, 10, "my_app_namespace", redisPool)
-pool.PeriodicallyEnqueue("0 0 * * * *", "calculate_caches") // This will enqueue a "calculate_caches" job every hour
-pool.Job("calculate_caches", (*Context).CalculateCaches) // Still need to register a handler for this job separately
+pool.PeriodicallyEnqueue("0 0 * * * *", "calculate_caches") // This will enqueue a "calculate_caches" task every hour
+pool.Job("calculate_caches", (*Context).CalculateCaches) // Still need to register a handler for this task separately
 ```
 
 ## Job concurrency
@@ -245,8 +245,8 @@ The web UI provides a view to view the state of your gocraft/work cluster, inspe
 
 Building an installing the binary:
 ```bash
-go get github.com/gocraft/work/cmd/workwebui
-go install github.com/gocraft/work/cmd/workwebui
+go get github.com/dhenisdj/scheduler/cmd/workwebui
+go install github.com/dhenisdj/scheduler/cmd/workwebui
 ```
 
 Then, you can run it:
@@ -353,7 +353,7 @@ The benches folder contains various benchmark code. In each case, we enqueue 100
 
 | Library | Speed |
 | --- | --- |
-| [gocraft/work](https://www.github.com/gocraft/work) | **20944 jobs/s** |
+| [gocraft/work](https://www.github.com/dhenisdj/scheduler) | **20944 jobs/s** |
 | [jrallison/go-workers](https://www.github.com/jrallison/go-workers) | 19945 jobs/s |
 | [benmanns/goworker](https://www.github.com/benmanns/goworker) | 10328.5 jobs/s |
 | [albrow/jobs](https://www.github.com/albrow/jobs) | 40 jobs/s |
@@ -366,7 +366,7 @@ gocraft offers a toolkit for building web apps. Currently these packages are ava
 * [gocraft/web](https://github.com/gocraft/web) - Go Router + Middleware. Your Contexts.
 * [gocraft/dbr](https://github.com/gocraft/dbr) - Additions to Go's database/sql for super fast performance and convenience.
 * [gocraft/health](https://github.com/gocraft/health) - Instrument your web apps with logging and metrics.
-* [gocraft/work](https://github.com/gocraft/work) - Process background jobs in Go.
+* [gocraft/work](https://github.com/dhenisdj/scheduler) - Process background jobs in Go.
 
 These packages were developed by the [engineering team](https://eng.uservoice.com) at [UserVoice](https://www.uservoice.com) and currently power much of its infrastructure and tech stack.
 

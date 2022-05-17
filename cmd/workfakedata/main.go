@@ -3,16 +3,20 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/dhenisdj/scheduler/component/actors/enqueue"
+	"github.com/dhenisdj/scheduler/component/actors/pool"
+	"github.com/dhenisdj/scheduler/component/actors/task"
+	context "github.com/dhenisdj/scheduler/component/common/context"
+	"github.com/dhenisdj/scheduler/config"
 	"math/rand"
 	"time"
 
-	"github.com/gocraft/work"
 	"github.com/gomodule/redigo/redis"
 )
 
-var redisHostPort = flag.String("redis", ":6379", "redis hostport")
+var redisHostPort = flag.String("redi", ":6379", "redi hostport")
 
-func epsilonHandler(job *work.Job) error {
+func epsilonHandler(job *task.Job) error {
 	fmt.Println("epsilon")
 	time.Sleep(time.Second)
 
@@ -22,35 +26,33 @@ func epsilonHandler(job *work.Job) error {
 	return nil
 }
 
-type context struct{}
-
 func main() {
 	flag.Parse()
 	fmt.Println("Installing some fake data")
 
-	pool := newPool(*redisHostPort)
-	cleanKeyspace(pool, work.WorkerPoolNamespace)
+	redis := newPool(*redisHostPort)
+	cleanKeyspace(redis, config.SchedulerNamespace)
 
 	// Enqueue some jobs:
 	go func() {
-		conn := pool.Get()
+		conn := redis.Get()
 		defer conn.Close()
-		conn.Do("SADD", work.WorkerPoolNamespace+":known_jobs", "foobar")
+		conn.Do("SADD", config.SchedulerNamespace+":known_jobs", "foobar")
 	}()
 
 	go func() {
 		for {
-			en := work.NewEnqueuer(work.WorkerPoolNamespace, pool)
+			en := enqueue.NewEnqueuer(context.New(), config.SchedulerNamespace, "", "", redis)
 			for i := 0; i < 20; i++ {
-				en.Enqueue("foobar", work.Q{"i": i})
+				en.Enqueue("foobar", task.Q{"i": i})
 			}
 
 			time.Sleep(1 * time.Second)
 		}
 	}()
 
-	configuration := work.InitConfig("live")
-	wp := work.NewWorkerPool(context{}, *configuration.Spark.Executor, pool)
+	configuration := config.InitConfig("test_sg")
+	wp := pool.NewWorkerPool(context.New(), configuration, redis)
 	wp.Job("foobar", epsilonHandler)
 	wp.Start()
 
@@ -68,10 +70,10 @@ func newPool(addr string) *redis.Pool {
 				return nil, err
 			}
 			return c, nil
-			//return redis.NewLoggingConn(c, log.New(os.Stdout, "", 0), "redis"), err
+			//return redi.NewLoggingConn(c, log.New(os.Stdout, "", 0), "redi"), err
 		},
 		Wait: true,
-		//TestOnBorrow: func(c redis.Conn, t time.Time) error {
+		//TestOnBorrow: func(c redi.Conn, t time.Time) error {
 		//	_, err := c.Do("PING")
 		//	return err
 		//},

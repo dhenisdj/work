@@ -3,20 +3,24 @@ package webui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dhenisdj/scheduler/component/actors/enqueue"
+	pool2 "github.com/dhenisdj/scheduler/component/actors/pool"
+	"github.com/dhenisdj/scheduler/component/actors/task"
+	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/config"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/gocraft/work"
 	"github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestWebUIStartStop(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
 
 	s := NewServer(ns, pool, ":6666")
@@ -27,13 +31,13 @@ func TestWebUIStartStop(t *testing.T) {
 type TestContext struct{}
 
 func TestWebUIQueues(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
-	configuration := work.InitConfig("test")
+	configuration := config.InitConfig("test")
 
 	// Get some stuff to to show up in the jobs:
-	enqueuer := work.NewEnqueuer(ns, pool)
+	enqueuer := enqueue.NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
 	assert.NoError(t, err)
 	enqueuer.Enqueue("foo", nil)
@@ -41,14 +45,14 @@ func TestWebUIQueues(t *testing.T) {
 
 	// Start a pool to work on it. It's going to work on the queues
 	// side effect of that is knowing which jobs are avail
-	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
-	wp.Job("wat", func(job *work.Job) error {
+	wp := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp.Job("wat", func(job *task.Job) error {
 		return nil
 	})
-	wp.Job("foo", func(job *work.Job) error {
+	wp.Job("foo", func(job *task.Job) error {
 		return nil
 	})
-	wp.Job("zaz", func(job *work.Job) error {
+	wp.Job("zaz", func(job *task.Job) error {
 		return nil
 	})
 	wp.Start()
@@ -84,20 +88,20 @@ func TestWebUIQueues(t *testing.T) {
 }
 
 func TestWebUIWorkerPools(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
-	configuration := work.InitConfig("test")
+	configuration := config.InitConfig("test")
 
-	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
-	wp.Job("wat", func(job *work.Job) error { return nil })
-	wp.Job("bob", func(job *work.Job) error { return nil })
+	wp := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp.Job("wat", func(job *task.Job) error { return nil })
+	wp.Job("bob", func(job *task.Job) error { return nil })
 	wp.Start()
 	defer wp.Stop()
 
-	wp2 := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
-	wp2.Job("foo", func(job *work.Job) error { return nil })
-	wp2.Job("bar", func(job *work.Job) error { return nil })
+	wp2 := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp2.Job("foo", func(job *task.Job) error { return nil })
+	wp2.Job("bar", func(job *task.Job) error { return nil })
 	wp2.Start()
 	defer wp2.Stop()
 
@@ -123,18 +127,18 @@ func TestWebUIWorkerPools(t *testing.T) {
 }
 
 func TestWebUIBusyWorkers(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
-	configuration := work.InitConfig("test")
+	configuration := config.InitConfig("test")
 
-	// Keep a job in the in-progress state without using sleeps
+	// Keep a task in the in-progress state without using sleeps
 	wgroup := sync.WaitGroup{}
 	wgroup2 := sync.WaitGroup{}
 	wgroup2.Add(1)
 
-	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
-	wp.Job("wat", func(job *work.Job) error {
+	wp := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp.Job("wat", func(job *task.Job) error {
 		wgroup2.Done()
 		wgroup.Wait()
 		return nil
@@ -142,7 +146,7 @@ func TestWebUIBusyWorkers(t *testing.T) {
 	wp.Start()
 	defer wp.Stop()
 
-	wp2 := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp2 := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
 	wp2.Start()
 	defer wp2.Stop()
 
@@ -162,8 +166,8 @@ func TestWebUIBusyWorkers(t *testing.T) {
 
 	wgroup.Add(1)
 
-	// Ok, now let's make a busy worker
-	enqueuer := work.NewEnqueuer(ns, pool)
+	// Ok, now let's make a busy work
+	enqueuer := enqueue.NewEnqueuer(ns, pool)
 	enqueuer.Enqueue("wat", nil)
 	wgroup2.Wait()
 	time.Sleep(5 * time.Millisecond) // need to let obsever process
@@ -186,17 +190,17 @@ func TestWebUIBusyWorkers(t *testing.T) {
 }
 
 func TestWebUIRetryJobs(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
-	configuration := work.InitConfig("test")
+	configuration := config.InitConfig("test")
 
-	enqueuer := work.NewEnqueuer(ns, pool)
+	enqueuer := enqueue.NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
 	assert.Nil(t, err)
 
-	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
-	wp.Job("wat", func(job *work.Job) error {
+	wp := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp.Job("wat", func(job *task.Job) error {
 		return fmt.Errorf("ohno")
 	})
 	wp.Start()
@@ -230,11 +234,11 @@ func TestWebUIRetryJobs(t *testing.T) {
 }
 
 func TestWebUIScheduledJobs(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
 
-	enqueuer := work.NewEnqueuer(ns, pool)
+	enqueuer := enqueue.NewEnqueuer(ns, pool)
 	_, err := enqueuer.EnqueueIn("watter", 1, nil)
 	assert.Nil(t, err)
 
@@ -263,18 +267,18 @@ func TestWebUIScheduledJobs(t *testing.T) {
 }
 
 func TestWebUIDeadJobs(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
-	configuration := work.InitConfig("test")
+	configuration := config.InitConfig("test")
 
-	enqueuer := work.NewEnqueuer(ns, pool)
+	enqueuer := enqueue.NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
 	_, err = enqueuer.Enqueue("wat", nil)
 	assert.Nil(t, err)
 
-	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
-	wp.JobWithOptions("wat", work.JobOptions{Priority: 1, MaxFails: 1}, func(job *work.Job) error {
+	wp := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp.JobWithOptions("wat", task.JobOptions{Priority: 1, MaxFails: 1}, func(job *task.Job) error {
 		return fmt.Errorf("ohno")
 	})
 	wp.Start()
@@ -352,18 +356,18 @@ func TestWebUIDeadJobs(t *testing.T) {
 }
 
 func TestWebUIDeadJobsDeleteRetryAll(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	cleanKeyspace(ns, pool)
-	configuration := work.InitConfig("test")
+	configuration := config.InitConfig("test")
 
-	enqueuer := work.NewEnqueuer(ns, pool)
+	enqueuer := enqueue.NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue("wat", nil)
 	_, err = enqueuer.Enqueue("wat", nil)
 	assert.Nil(t, err)
 
-	wp := work.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
-	wp.JobWithOptions("wat", work.JobOptions{Priority: 1, MaxFails: 1}, func(job *work.Job) error {
+	wp := pool2.NewWorkerPool(TestContext{}, *configuration.Spark.Executor, pool)
+	wp.JobWithOptions("wat", task.JobOptions{Priority: 1, MaxFails: 1}, func(job *task.Job) error {
 		return fmt.Errorf("ohno")
 	})
 	wp.Start()
@@ -454,8 +458,8 @@ func TestWebUIDeadJobsDeleteRetryAll(t *testing.T) {
 }
 
 func TestWebUIAssets(t *testing.T) {
-	pool := newTestPool(":6379")
-	ns := work.WorkerPoolNamespace
+	pool := helper.NewTestPool(":6379")
+	ns := config.SchedulerNamespace
 	s := NewServer(ns, pool, ":6666")
 
 	recorder := httptest.NewRecorder()
@@ -467,18 +471,6 @@ func TestWebUIAssets(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	request, _ = http.NewRequest("GET", "/work.js", nil)
 	s.router.ServeHTTP(recorder, request)
-}
-
-func newTestPool(addr string) *redis.Pool {
-	return &redis.Pool{
-		MaxActive:   3,
-		MaxIdle:     3,
-		IdleTimeout: 240 * time.Second,
-		Dial: func() (redis.Conn, error) {
-			return redis.Dial("tcp", addr)
-		},
-		Wait: true,
-	}
 }
 
 func cleanKeyspace(namespace string, pool *redis.Pool) {

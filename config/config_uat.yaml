@@ -64,7 +64,7 @@ spark:
     - hdfs://R2/projects/sztoc_audiencemanager/executable/uat/sg/amengine-0.1-py3.9.egg
   archives:
     - hdfs://R2/projects/sztoc_audiencemanager/python/env/am_py_39.tar.gz#env
-  conf: |-
+  sparkConf: |-
     {
       "spark.sql.files.mergeSmallFile.enabled": "true",
       "spark.sql.files.mergeSmallFile.maxBytes": "1073742000",
@@ -107,7 +107,7 @@ spark:
         driverCores: 1
         executorMemory: 6g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     SyncDistributionCrm:
       name: SyncDistributionCrm
       type: single
@@ -127,7 +127,7 @@ spark:
         driverCores: 1
         executorMemory: 5g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     DistributeIncrCalc:
       name: DistributeIncrCalc
       type: single
@@ -159,7 +159,7 @@ spark:
         driverCores: 1
         executorMemory: 8g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     SyncDistributionCommon:
       name: SyncDistributionCommon
       type: single
@@ -179,7 +179,7 @@ spark:
         driverCores: 1
         executorMemory: 8g
         executorCores: 1
-        numExecutor: 20
+        numExecutors: 20
     MergeFiles:
       name: MergeFiles
       type: single
@@ -211,7 +211,7 @@ spark:
         driverCores: 1
         executorMemory: 1g
         executorCores: 2
-        numExecutor: 2
+        numExecutors: 2
     UpdateAttribute:
       name: UpdateAttribute
       type: single
@@ -231,7 +231,7 @@ spark:
         driverCores: 1
         executorMemory: 6g
         executorCores: 2
-        numExecutor: 20
+        numExecutors: 20
     SyncAudienceRecordHive:
       name: SyncAudienceRecordHive
       type: single
@@ -251,4 +251,4 @@ spark:
         driverCores: 1
         executorMemory: 8g
         executorCores: 2
-        numExecutor: 20
+        numExecutors: 20
