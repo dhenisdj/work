@@ -31,18 +31,22 @@ func NewAPI(livy *entities.Livy) *API {
 }
 
 func (a *API) Request(method, url string, data interface{}) (*http.Request, error) {
-	body, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-	stringBody := string(body)
-	if data == nil {
-		stringBody = ""
-	}
+	var request *http.Request
 
-	request, err := http.NewRequest(method, url, strings.NewReader(stringBody))
-	if err != nil {
-		return nil, err
+	for i := 1; i <= a.retry; i++ {
+		body, err := json.Marshal(data)
+		if i >= a.retry && err != nil {
+			return nil, fmt.Errorf("retry %d times marshal json error when build request %s", i, body)
+		}
+		stringBody := string(body)
+		if data == nil {
+			stringBody = ""
+		}
+
+		request, err = http.NewRequest(method, url, strings.NewReader(stringBody))
+		if i >= a.retry && err != nil {
+			return nil, fmt.Errorf("retry %d times new request error when build request %s", i, stringBody)
+		}
 	}
 
 	request.Header.Add("Content-Type", "application/json")
@@ -51,13 +55,17 @@ func (a *API) Request(method, url string, data interface{}) (*http.Request, erro
 }
 
 func (a *API) DoRequest(req *http.Request) (*http.Response, error) {
-	resp, err := a.Client.Do(req)
-	if err != nil {
-		body, _ := ioutil.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http status code %d mesage %s response %s", resp.StatusCode, resp.Status, body)
+	var response *http.Response
+	var err error
+	for i := 1; i <= a.retry; i++ {
+		response, err = a.Client.Do(req)
+		if i >= a.retry && err != nil {
+			body, _ := ioutil.ReadAll(response.Body)
+			return nil, fmt.Errorf("retry %d times with status code %d mesage %s response %s", i, response.StatusCode, response.Status, body)
+		}
 	}
 
-	return resp, nil
+	return response, nil
 }
 
 func (a *API) buildBatchRequest(method, uri string, account *entities.Account, args map[string]interface{}) (*http.Request, error) {
