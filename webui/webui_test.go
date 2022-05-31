@@ -6,7 +6,7 @@ import (
 	"github.com/dhenisdj/scheduler/component/actors/enqueue"
 	pool2 "github.com/dhenisdj/scheduler/component/actors/pool"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"net/http"
 	"net/http/httptest"

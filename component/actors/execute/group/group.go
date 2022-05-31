@@ -1,19 +1,20 @@
 package group
 
 import (
-	context "github.com/dhenisdj/scheduler/component/common/context"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"github.com/gomodule/redigo/redis"
 	"reflect"
 )
 
 type Group struct {
+	GroupName   string
 	Env         string
 	Namespace   string
 	GroupID     string
 	PoolID      string
 	Pool        *redis.Pool
-	ctx         *context.Context
+	Ctx         context.Context
 	contextType reflect.Type
 
 	Started bool
@@ -21,10 +22,10 @@ type Group struct {
 
 type GroupOption func(g *Group)
 
-func WithContext(ctx *context.Context) GroupOption {
+func WithContext(ctx context.Context) GroupOption {
 	return func(g *Group) {
-		g.ctx = ctx
-		g.contextType = reflect.TypeOf(*ctx)
+		g.Ctx = ctx
+		g.contextType = reflect.TypeOf(ctx)
 	}
 }
 
@@ -34,8 +35,9 @@ func WithRedis(pool *redis.Pool) GroupOption {
 	}
 }
 
-func NewGroup(env, namespace, poolID string, opts ...GroupOption) *Group {
+func NewGroup(env, namespace, poolID, groupName string, opts ...GroupOption) *Group {
 	g := &Group{
+		GroupName: groupName,
 		Namespace: namespace,
 		GroupID:   utils.MakeIdentifier(),
 		PoolID:    poolID,

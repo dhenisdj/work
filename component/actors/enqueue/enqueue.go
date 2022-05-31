@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"github.com/dhenisdj/scheduler/client"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"sync"
 	"time"
@@ -18,8 +18,7 @@ type Enqueuer struct {
 	Namespace string // eg, "an"
 	Executor  string // eg, "SyncAudienceRecordHive"
 	Biz       string // eg, "crm"
-	Pool      *redis.Pool
-	ctx       *context.Context
+	ctx       context.Context
 
 	queuePrefix           string // eg, "myapp-work:jobs:"
 	knownJobs             map[string]int64
@@ -29,16 +28,12 @@ type Enqueuer struct {
 }
 
 // NewEnqueuer creates a new enqueuer with the specified Redis namespace and Redis pool.
-func NewEnqueuer(ctx *context.Context, namespace, executor, biz string, pool *redis.Pool) *Enqueuer {
-	if pool == nil {
-		panic("NewEnqueuer needs a non-nil *redi.Pool")
-	}
+func NewEnqueuer(ctx context.Context, namespace, executor, biz string) *Enqueuer {
 
 	return &Enqueuer{
 		Namespace:             namespace,
 		Executor:              executor,
 		Biz:                   biz,
-		Pool:                  pool,
 		ctx:                   ctx,
 		queuePrefix:           models.RedisKey2JobPrefix(namespace),
 		knownJobs:             make(map[string]int64),
@@ -47,27 +42,28 @@ func NewEnqueuer(ctx *context.Context, namespace, executor, biz string, pool *re
 	}
 }
 
-func (e *Enqueuer) EnqueueSparkTask(job *task.Job) *task.Job {
+func (e *Enqueuer) EnqueueSpark(job *task.Job) *task.Job {
 	var runErr error
 	jobName := job.Name
 	rawJSON, err := job.Serialize()
 	if err != nil {
-		runErr = fmt.Errorf("serialize task to raw json error")
-		e.ctx.LE("enqueue task ", runErr)
+		runErr = fmt.Errorf("task serialized to json error")
+		e.ctx.LE("task enqueue ", runErr)
 	}
 
-	conn := e.Pool.Get()
+	conn := e.ctx.Redis().Get()
 	defer conn.Close()
 
 	if _, err := conn.Do("LPUSH", e.queuePrefix+jobName, rawJSON); err != nil {
-		runErr = fmt.Errorf("lpush task to redi error")
-		e.ctx.LE("enqueue task ", runErr)
+		runErr = fmt.Errorf("lpush task to redis error")
+		e.ctx.LE("task enqueue ", runErr)
 	}
 
 	if err := e.addToKnownJobs(conn, jobName); err != nil {
 		runErr = fmt.Errorf("add to known jobs error")
-		e.ctx.LE("enqueue task ", runErr)
+		e.ctx.LE("task enqueue ", runErr)
 	}
+	e.ctx.If("task %s enqueued with %s", job.ID, rawJSON)
 
 	return job
 }
@@ -87,7 +83,7 @@ func (e *Enqueuer) Enqueue(jobName string, args map[string]interface{}) (*task.J
 		return nil, err
 	}
 
-	conn := e.Pool.Get()
+	conn := e.ctx.Redis().Get()
 	defer conn.Close()
 
 	if _, err := conn.Do("LPUSH", e.queuePrefix+jobName, rawJSON); err != nil {
@@ -115,7 +111,7 @@ func (e *Enqueuer) EnqueueIn(jobName string, secondsFromNow int64, args map[stri
 		return nil, err
 	}
 
-	conn := e.Pool.Get()
+	conn := e.ctx.Redis().Get()
 	defer conn.Close()
 
 	scheduledJob := &client.ScheduledJob{
@@ -245,7 +241,7 @@ func (e *Enqueuer) uniqueJobHelper(jobName string, args map[string]interface{}, 
 	}
 
 	enqueueFn := func(runAt *int64) (string, error) {
-		conn := e.Pool.Get()
+		conn := e.ctx.Redis().Get()
 		defer conn.Close()
 
 		if err := e.addToKnownJobs(conn, jobName); err != nil {

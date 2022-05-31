@@ -1,11 +1,9 @@
-package runner
+package handler
 
 import (
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/common/context"
-	"github.com/dhenisdj/scheduler/component/handler"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"reflect"
 	"testing"
 
@@ -13,18 +11,18 @@ import (
 )
 
 func TestRunBasicMiddleware(t *testing.T) {
-	mw1 := func(j *task.Job, next handler.NextMiddlewareFunc) error {
+	mw1 := func(j *task.Job, next NextMiddlewareFunc) error {
 		j.SetArg("mw1", "mw1")
 		return next()
 	}
 
-	mw2 := func(c *helper.TstCtx, j *task.Job, next handler.NextMiddlewareFunc) error {
+	mw2 := func(c *helper.TstCtx, j *task.Job, next NextMiddlewareFunc) error {
 		c.Record(j.Args["mw1"].(string))
 		c.Record("mw2")
 		return next()
 	}
 
-	mw3 := func(c *helper.TstCtx, j *task.Job, next handler.NextMiddlewareFunc) error {
+	mw3 := func(c *helper.TstCtx, j *task.Job, next NextMiddlewareFunc) error {
 		c.Record("mw3")
 		return next()
 	}
@@ -35,7 +33,7 @@ func TestRunBasicMiddleware(t *testing.T) {
 		return nil
 	}
 
-	middleware := []*handler.MiddlewareHandler{
+	middleware := []*MiddlewareHandler{
 		{IsGeneric: true, GenericMiddlewareHandler: mw1},
 		{IsGeneric: false, DynamicMiddleware: reflect.ValueOf(mw2)},
 		{IsGeneric: false, DynamicMiddleware: reflect.ValueOf(mw3)},
@@ -52,14 +50,14 @@ func TestRunBasicMiddleware(t *testing.T) {
 		Args: map[string]interface{}{"a": "foo"},
 	}
 
-	v, err := RunJob(job, context.ContextType, middleware, jt)
+	v, err := RunJob(job, helper.TstCtxType, middleware, jt)
 	assert.NoError(t, err)
 	c := v.Interface().(*helper.TstCtx)
 	assert.Equal(t, "mw1mw2mw3h1foo", c.String())
 }
 
 func TestRunHandlerError(t *testing.T) {
-	mw1 := func(j *task.Job, next handler.NextMiddlewareFunc) error {
+	mw1 := func(j *task.Job, next NextMiddlewareFunc) error {
 		return next()
 	}
 	h1 := func(c *helper.TstCtx, j *task.Job) error {
@@ -67,7 +65,7 @@ func TestRunHandlerError(t *testing.T) {
 		return fmt.Errorf("h1_err")
 	}
 
-	middleware := []*handler.MiddlewareHandler{
+	middleware := []*MiddlewareHandler{
 		{IsGeneric: true, GenericMiddlewareHandler: mw1},
 	}
 
@@ -90,7 +88,7 @@ func TestRunHandlerError(t *testing.T) {
 }
 
 func TestRunMwError(t *testing.T) {
-	mw1 := func(j *task.Job, next handler.NextMiddlewareFunc) error {
+	mw1 := func(j *task.Job, next NextMiddlewareFunc) error {
 		return fmt.Errorf("mw1_err")
 	}
 	h1 := func(c *helper.TstCtx, j *task.Job) error {
@@ -98,7 +96,7 @@ func TestRunMwError(t *testing.T) {
 		return fmt.Errorf("h1_err")
 	}
 
-	middleware := []*handler.MiddlewareHandler{
+	middleware := []*MiddlewareHandler{
 		{IsGeneric: true, GenericMiddlewareHandler: mw1},
 	}
 
@@ -118,7 +116,7 @@ func TestRunMwError(t *testing.T) {
 }
 
 func TestRunHandlerPanic(t *testing.T) {
-	mw1 := func(j *task.Job, next handler.NextMiddlewareFunc) error {
+	mw1 := func(j *task.Job, next NextMiddlewareFunc) error {
 		return next()
 	}
 	h1 := func(c *helper.TstCtx, j *task.Job) error {
@@ -127,7 +125,7 @@ func TestRunHandlerPanic(t *testing.T) {
 		panic("dayam")
 	}
 
-	middleware := []*handler.MiddlewareHandler{
+	middleware := []*MiddlewareHandler{
 		{IsGeneric: true, GenericMiddlewareHandler: mw1},
 	}
 
@@ -147,7 +145,7 @@ func TestRunHandlerPanic(t *testing.T) {
 }
 
 func TestRunMiddlewarePanic(t *testing.T) {
-	mw1 := func(j *task.Job, next handler.NextMiddlewareFunc) error {
+	mw1 := func(j *task.Job, next NextMiddlewareFunc) error {
 		panic("dayam")
 	}
 	h1 := func(c *helper.TstCtx, j *task.Job) error {
@@ -155,7 +153,7 @@ func TestRunMiddlewarePanic(t *testing.T) {
 		return nil
 	}
 
-	middleware := []*handler.MiddlewareHandler{
+	middleware := []*MiddlewareHandler{
 		{IsGeneric: true, GenericMiddlewareHandler: mw1},
 	}
 

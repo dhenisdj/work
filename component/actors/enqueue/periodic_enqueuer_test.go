@@ -3,10 +3,10 @@ package enqueue
 import (
 	"github.com/dhenisdj/scheduler/client"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"testing"
 	"time"
@@ -29,11 +29,11 @@ func TestPeriodicEnqueuer(t *testing.T) {
 	utils.SetNowEpochSecondsMock(1468359453)
 	defer utils.ResetNowEpochSecondsMock()
 
-	pe := NewPeriodicEnqueuer(context.New(), ns, pool, pjs)
+	pe := NewPeriodicEnqueuer(context.New("test_sg", true), ns, pool, pjs)
 	err := pe.enqueue()
 	assert.NoError(t, err)
 
-	c := client.NewClient(ctx, ns, pool)
+	c := client.NewClient(ctx, ns)
 	scheduledJobs, count, err := c.ScheduledJobs(1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 20, count)
@@ -109,7 +109,7 @@ func TestPeriodicEnqueuerSpawn(t *testing.T) {
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
 
-	pe := NewPeriodicEnqueuer(context.New(), ns, pool, nil)
+	pe := NewPeriodicEnqueuer(context.New("test_sg", true), ns, pool, nil)
 	pe.Start()
 	pe.Stop()
 }

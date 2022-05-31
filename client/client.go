@@ -3,8 +3,8 @@ package client
 import (
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"sort"
 	"strconv"
@@ -24,15 +24,13 @@ var ErrNotRetried = fmt.Errorf("nothing retried")
 // Client implements all of the functionality of the web UI. It can be used to inspect the status of a running cluster and retry dead jobs.
 type Client struct {
 	namespace string
-	pool      *redis.Pool
-	ctx       *context.Context
+	ctx       context.Context
 }
 
 // NewClient creates a new Client with the specified redi namespace and connection pool.
-func NewClient(ctx *context.Context, namespace string, pool *redis.Pool) *Client {
+func NewClient(ctx context.Context, namespace string) *Client {
 	return &Client{
 		namespace: namespace,
-		pool:      pool,
 		ctx:       ctx,
 	}
 }
@@ -51,7 +49,7 @@ type WorkerPoolHeartbeat struct {
 
 // WorkerPoolHeartbeats queries Redis and returns all WorkerPoolHeartbeat's it finds (even for those work pools which don't have a current heartbeat).
 func (c *Client) WorkerPoolHeartbeats() ([]*WorkerPoolHeartbeat, error) {
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 
 	workerPoolsKey := models.RedisKey2Pools(c.namespace)
@@ -139,7 +137,7 @@ type WorkerObservation struct {
 
 // WorkerObservations returns all of the WorkerObservation's it finds for all work pools' workers.
 func (c *Client) WorkerObservations() ([]*WorkerObservation, error) {
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 
 	hbs, err := c.WorkerPoolHeartbeats()
@@ -217,7 +215,7 @@ type Queue struct {
 
 // Queues returns the Queue's it finds.
 func (c *Client) Queues() ([]*Queue, error) {
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 
 	key := models.RedisKey2ValidJobs(c.namespace)
@@ -396,7 +394,7 @@ func (c *Client) RetryDeadJob(diedAt int64, jobID string) error {
 	args = append(args, diedAt)
 	args = append(args, jobID)
 
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 
 	cnt, err := redis.Int64(script.Do(conn, args...))
@@ -438,7 +436,7 @@ func (c *Client) RetryAllDeadJobs() error {
 	args = append(args, utils.NowEpochSeconds())
 	args = append(args, 1000)
 
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 
 	// Cap iterations for safety (which could reprocess 1k*1k jobs).
@@ -460,7 +458,7 @@ func (c *Client) RetryAllDeadJobs() error {
 
 // DeleteAllDeadJobs deletes all dead jobs.
 func (c *Client) DeleteAllDeadJobs() error {
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 	_, err := conn.Do("DEL", models.RedisKey2JobDead(c.namespace))
 	if err != nil {
@@ -492,7 +490,7 @@ func (c *Client) DeleteScheduledJob(scheduledFor int64, jobID string) error {
 				c.ctx.LE("client.delete_scheduled_job.redis_key_unique_job", err)
 				return err
 			}
-			conn := c.pool.Get()
+			conn := c.ctx.Redis().Get()
 			defer conn.Close()
 
 			_, err = conn.Do("DEL", uniqueKey)
@@ -530,7 +528,7 @@ func (c *Client) deleteZsetJob(zsetKey string, zscore int64, jobID string) (bool
 	args = append(args, zscore)  // ARGV[1]
 	args = append(args, jobID)   // ARGV[2]
 
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 	values, err := redis.Values(script.Do(conn, args...))
 	if len(values) != 2 {
@@ -554,7 +552,7 @@ type jobScore struct {
 }
 
 func (c *Client) getZsetPage(key string, page uint) ([]jobScore, int64, error) {
-	conn := c.pool.Get()
+	conn := c.ctx.Redis().Get()
 	defer conn.Close()
 
 	if page == 0 {

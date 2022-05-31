@@ -62,16 +62,28 @@ am:
 airflow:
   seatalk: https://openapi.seatalk.io/webhook/group/n8tu6rsWQrmQ0VA_XsOXag
 
+redis:
+  network: tcp
+  addr: localhost:6379
+  maxActive: 20
+  maxIdle: 20
+  idleTimeoutSecond: 240
+
 spark:
   jars:
     - hdfs://R2/projects/sztoc_audiencemanager/jars/aws-java-sdk-bundle-1.11.375.jar
     - hdfs://R2/projects/sztoc_audiencemanager/jars/hadoop-aws-3.2.0-sdi-001.jar
   file: hdfs://R2/projects/sztoc_audiencemanager/executable/test/%s/run_app.py
-  args:
-    - --app
-    - am_sync_analytical_ma
-    - --env
-    - test
+  apps: |-
+    {
+      "FilterAudienceUsers": "am_audience_filter",
+      "SyncDistributionCrm": "am_distribution_crm",
+      "DistributeIncrCalc": "am_distribution_incremental",
+      "SyncDistributionCommon": "am_distribution_referral",
+      "MergeFiles": "am_merge_files",
+      "UpdateAttribute": "am_attribute_update",
+      "SyncAudienceRecordHive": "am_sync_analytical_ma"
+    }
   pyFiles:
     - hdfs://R2/projects/sztoc_audiencemanager/executable/test/%s/amengine-0.1-py3.9.egg
   archives:
@@ -87,17 +99,27 @@ spark:
       "spark.executorEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
       "spark.dynamicAllocation.enabled": "false"
     }
-  hiveConf: |-
-    {
-      "livy.session.conf.spark.sql.files.mergeSmallFile.enabled": "true",
-      "livy.session.conf.spark.sql.files.mergeSmallFile.maxBytes": "1073742000",
-      "livy.session.conf.spark.pyspark.python": "./env/bin/python",
-      "livy.session.conf.spark.yarn.appMasterEnv.PYSPARK_PYTHON": "./env/bin/python",
-      "livy.session.conf.spark.yarn.appMasterEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
-      "livy.session.conf.spark.executorEnv.PYSPARK_PYTHON": "./env/bin/python",
-      "livy.session.conf.spark.executorEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
-      "livy.session.conf.spark.dynamicAllocation.enabled": "false"
-    }
+  livy:
+    retry: 3
+    rest:
+      protocol: http
+      url: livy-rest.data-infra.shopee.io
+      single:
+        create: /batches
+        get: /batches/{batchId}
+        state: /batches/{batchId}/state
+        delete: /batches/{batchId}
+        logs: /batches/{batchId}/amlogs/{type}?from={start}&size={logSize}
+      interactive:
+        create: /sessions
+        get: /sessions/{interactiveId}
+        delete: /sessions/{interactiveId}
+        logs: /sessions/{interactiveId}/amlogs/{type}?from={start}&size={logSize}
+        execute: /sessions/{interactiveId}/statements
+        query: /sessions/{interactiveId}/statements/{statementId}
+    thrift:
+      host: jdbc:hive2://10.173.1.3
+      port: 10090
   executor:
     FilterAudienceUsers:
       name: FilterAudienceUsers
@@ -120,9 +142,9 @@ spark:
             name: staging_opa_audiencemanager_om
             password: NrQnLsK89RjO
         concurrency:
-          ads_ops: 1
-          crm: 1
-          om: 1
+          ads_ops: 3
+          crm: 3
+          om: 3
         queue:
           ads_ops: szopam-test
           crm: szopam-test
@@ -143,10 +165,10 @@ spark:
           - crm
         account:
           crm:
-            name: ""
-            password: ""
+            name: haiping.lai
+            password: bMHhMu4uQs1X
         concurrency:
-          crm: 1
+          crm: 3
         queue:
           crm: szopam-test
       resource:
@@ -232,9 +254,9 @@ spark:
             name: staging_opa_audiencemanager_om
             password: NrQnLsK89RjO
         concurrency:
-          ads_ops: 2
-          crm: 2
-          om: 2
+          ads_ops: 3
+          crm: 3
+          om: 3
         queue:
           ads_ops: szopam-test
           crm: szopam-test
@@ -258,7 +280,7 @@ spark:
             name: staging_opa_audiencemanager_crm_attr
             password: x4mvSV6RMa4A
         concurrency:
-          crm: 1
+          crm: 2
         queue:
           crm: szopam-test
       resource:
@@ -272,8 +294,6 @@ spark:
       session:
         isBatch: false
         renewIntervalSeconds: 0
-        hiveConf:
-
       business:
         validate:
           - crm
@@ -282,7 +302,7 @@ spark:
             name: staging_sztoc_audiencemanager
             password: SdKWIYBvo6tT
         concurrency:
-          crm: 1
+          crm: 2
         queue:
           crm: szopam-test
       resource:

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/enqueue"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/handler"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"reflect"
 	"testing"
@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.New()
+var ctx = context.New("test_sg", true)
 
 func TestWorkerPoolHandlerValidations(t *testing.T) {
 	var cases = []struct {
@@ -69,9 +69,7 @@ func TestWorkerPoolMiddlewareValidations(t *testing.T) {
 }
 
 func TestWorkerPoolStartStop(t *testing.T) {
-	configuration := config.InitConfig("test")
-	pool := helper.NewTestPool(":6379")
-	wp := NewWorkerPool(context.New(), configuration, pool)
+	wp := NewWorkerPool(context.New("test_sg", true))
 	wp.Start()
 	wp.Start()
 	wp.Stop()
@@ -81,9 +79,7 @@ func TestWorkerPoolStartStop(t *testing.T) {
 }
 
 func TestWorkerPoolValidations(t *testing.T) {
-	configuration := config.InitConfig("test")
-	pool := helper.NewTestPool(":6379")
-	wp := NewWorkerPool(context.New(), configuration, pool)
+	wp := NewWorkerPool(context.New("test_sg", true))
 
 	func() {
 		defer func() {
@@ -118,7 +114,7 @@ func TestWorkersPoolRunSingleThreaded(t *testing.T) {
 	wp := setupTestWorkerPool(pool, ns, job1, task.JobOptions{Priority: 1, MaxConcurrency: 1})
 	wp.Start()
 	// enqueue some jobs
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	for i := 0; i < numJobs; i++ {
 		_, err := enqueuer.Enqueue(job1, task.Q{"sleep": sleepTime})
 		assert.Nil(t, err)
@@ -160,7 +156,7 @@ func TestWorkerPoolPauseSingleThreadedJobs(t *testing.T) {
 	wp := setupTestWorkerPool(pool, ns, job1, task.JobOptions{Priority: 1, MaxConcurrency: 1})
 	wp.Start()
 	// enqueue some jobs
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	for i := 0; i < numJobs; i++ {
 		_, err := enqueuer.Enqueue(job1, task.Q{"sleep": sleepTime})
 		assert.Nil(t, err)
@@ -206,8 +202,7 @@ func setupTestWorkerPool(pool *redis.Pool, namespace, jobName string, jobOpts ta
 	helper.DeleteQueue(pool, namespace, jobName)
 	helper.DeleteRetryAndDead(pool, namespace)
 	helper.DeletePausedAndLockedKeys(namespace, jobName, pool)
-	configuration := config.InitConfig("test")
-	wp := NewWorkerPool(context.New(), configuration, pool)
+	wp := NewWorkerPool(context.New("test_sg", true))
 	wp.JobWithOptions(jobName, jobOpts, (*helper.TestContext).SleepyJob)
 	// reset the backoff times to help with testing
 	config.SleepBackoffsInMilliseconds = []int64{10, 10, 10, 10, 10}

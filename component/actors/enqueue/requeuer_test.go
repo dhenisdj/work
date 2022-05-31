@@ -1,17 +1,17 @@
 package enqueue
 
 import (
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.New()
+var ctx = context.New("test_sg", true)
 
 func TestRequeue(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
@@ -22,7 +22,7 @@ func TestRequeue(t *testing.T) {
 	utils.SetNowEpochSecondsMock(tMock)
 	defer utils.ResetNowEpochSecondsMock()
 
-	enqueuer := NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.EnqueueIn("wat", -9, nil)
 	assert.NoError(t, err)
 	_, err = enqueuer.EnqueueIn("wat", -9, nil)
@@ -36,7 +36,7 @@ func TestRequeue(t *testing.T) {
 
 	utils.ResetNowEpochSecondsMock()
 
-	re := NewRequeuer(context.New(), ns, pool, models.RedisKey2JobScheduled(ns), []string{"wat", "foo", "bar"})
+	re := NewRequeuer(context.New("test_sg", true), ns, models.RedisKey2JobScheduled(ns), []string{"wat", "foo", "bar"})
 	re.Start()
 	re.drain()
 	re.Stop()
@@ -65,14 +65,14 @@ func TestRequeueUnknown(t *testing.T) {
 	utils.SetNowEpochSecondsMock(tMock)
 	defer utils.ResetNowEpochSecondsMock()
 
-	enqueuer := NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.EnqueueIn("wat", -9, nil)
 	assert.NoError(t, err)
 
 	nowish := utils.NowEpochSeconds()
 	utils.SetNowEpochSecondsMock(nowish)
 
-	re := NewRequeuer(context.New(), ns, pool, models.RedisKey2JobScheduled(ns), []string{"bar"})
+	re := NewRequeuer(context.New("test_sg", true), ns, models.RedisKey2JobScheduled(ns), []string{"bar"})
 	re.Start()
 	re.drain()
 	re.Stop()

@@ -5,10 +5,9 @@ import (
 	"github.com/beltran/gohive"
 	"github.com/dhenisdj/scheduler/component/actors/execute/observe"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/actors/task/runner"
-	"github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/entities"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/handler"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"github.com/dhenisdj/scheduler/config"
@@ -26,14 +25,22 @@ type Worker struct {
 	WorkerID                    string
 	poolID                      string
 	groupID                     string
-	pool                        *redis.Pool
-	jobTypes                    map[string]*task.JobType
+	jobType                     *task.JobType
 	sleepBackoffs               []int64
-	middleware                  []*handler.MiddlewareHandler
-	contextType                 reflect.Type
-	ctx                         *context.Context
-	conn                        *gohive.Connection
 
+	// Livy configuration
+	account *entities.Account
+
+	// Context configuration
+	contextType reflect.Type
+	ctx         context.Context
+	middleware  []*handler.MiddlewareHandler
+
+	// Thrift connect configuration
+	conn        *gohive.Connection
+	concurrency int
+
+	// Redis configuration
 	redisFetchScript *redis.Script
 	sampler          models.PrioritySampler
 	*observe.Observer
@@ -47,16 +54,10 @@ type Worker struct {
 
 type WorkerOption func(w *Worker)
 
-func WithContext(ctx *context.Context) WorkerOption {
+func WithContext(ctx context.Context) WorkerOption {
 	return func(w *Worker) {
 		w.ctx = ctx
-		w.contextType = reflect.TypeOf(*ctx)
-	}
-}
-
-func WithRedis(pool *redis.Pool) WorkerOption {
-	return func(w *Worker) {
-		w.pool = pool
+		w.contextType = reflect.TypeOf(ctx)
 	}
 }
 
@@ -83,8 +84,6 @@ func WithBatchSession(businessGroup string, session *entities.Session, business 
 		configuration.Username = account.Name
 		// This may not be necessary
 		configuration.Password = account.Password
-		concurrency := business.Concurrency[businessGroup]
-		configuration.FetchSize = int64(concurrency)
 		// TODO: the sparkConf key need to add prefix `livy.session.conf.` and below config need to be added too
 		// livy.session.name	         If set, will be used as YARN application name. Please note, Livy doesn't allow two session with same name exist.
 		// livy.session.queue	         Yarn queue
@@ -102,7 +101,17 @@ func WithBatchSession(businessGroup string, session *entities.Session, business 
 			m[fmt.Sprintf("livy.session.conf.%s", k)] = v
 		}
 		configuration.HiveConfiguration = m
-		connection, errConn := gohive.Connect(session.Host, session.Port, "NONE", configuration)
+
+		thrift := config.Livy.Thrift
+		connection, errConn := gohive.Connect(thrift.Host, thrift.Port, "NONE", configuration)
+
+		// Concurrency control
+		concurrency := business.Concurrency[businessGroup]
+		w.concurrency = concurrency
+		//for i := 0; i < concurrency; i++ {
+		//	connection.Cursor()
+		//}
+
 		if errConn != nil {
 			w.ctx.LE("Build interactive session error with: ", errConn)
 			panic(fmt.Sprintf("Can not initialize interactive session with error %s", errConn.Error()))
@@ -130,31 +139,30 @@ func NewWorker(namespace, workerID, groupID, poolID string, opts ...WorkerOption
 		opt(w)
 	}
 
-	w.Observer = observe.NewObserver(w.ctx, namespace, w.pool, workerID)
+	w.Observer = observe.NewObserver(w.ctx, namespace, workerID)
 	return w
 }
 
 // UpdateMiddlewareAndJobTypes note: can't be called while the thing is started
-func (w *Worker) UpdateMiddlewareAndJobTypes(middleware []*handler.MiddlewareHandler, jobTypes map[string]*task.JobType) {
+func (w *Worker) UpdateMiddlewareAndJobTypes(middleware []*handler.MiddlewareHandler, jobType *task.JobType) {
 	w.middleware = middleware
 	sampler := models.PrioritySampler{}
-	for _, jt := range jobTypes {
-		sampler.Add(jt.Priority,
-			models.RedisKey2Job(w.namespace, jt.Name),
-			models.RedisKey2JobInProgress(w.namespace, w.poolID, jt.Name),
-			models.RedisKey2JobPaused(w.namespace, jt.Name),
-			models.RedisKey2JobLock(w.namespace, jt.Name),
-			models.RedisKey2JobLockInfo(w.namespace, jt.Name),
-			models.RedisKey2JobConcurrency(w.namespace, jt.Name))
-	}
+	sampler.Add(jobType.Priority,
+		models.RedisKey2Job(w.namespace, jobType.Name),
+		models.RedisKey2JobInProgress(w.namespace, w.poolID, jobType.Name),
+		models.RedisKey2JobPaused(w.namespace, jobType.Name),
+		models.RedisKey2JobLock(w.namespace, jobType.Name),
+		models.RedisKey2JobLockInfo(w.namespace, jobType.Name),
+		models.RedisKey2JobConcurrency(w.namespace, jobType.Name))
 	w.sampler = sampler
-	w.jobTypes = jobTypes
-	w.redisFetchScript = redis.NewScript(len(jobTypes)*config.FetchKeysPerJobType, models.RedisLuaFetchJob)
+	w.jobType = jobType
+	w.redisFetchScript = redis.NewScript(config.FetchKeysPerJobType, models.RedisLuaFetchJob)
 }
 
 func (w *Worker) start() {
 	go w.loop()
 	go w.Observer.Start()
+	w.ctx.If("worker %s for %s started!", w.WorkerID, w.jobType.Name)
 }
 
 func (w *Worker) stop() {
@@ -173,29 +181,44 @@ func (w *Worker) drain() {
 func (w *Worker) loop() {
 	var drained bool
 	var consequtiveNoJobs int64
+	var sessionTicker *time.Ticker
 
 	// Begin immediately. We'll change the duration on each tick with a timer.Reset()
 	timer := time.NewTimer(0)
-	sessionTimer := time.NewTimer(time.Duration(w.sessionRenewIntervalSeconds) * time.Second)
+	if w.isBatch {
+		sessionTicker = time.NewTicker(time.Duration(w.sessionRenewIntervalSeconds) * time.Second)
+	}
+
 	defer func() {
 		timer.Stop()
-		sessionTimer.Stop()
+		if w.isBatch {
+			sessionTicker.Stop()
+		}
 	}()
 
 	for {
+
+		if w.isBatch {
+			fmt.Println("this is a interactive session")
+			select {
+			case <-sessionTicker.C:
+				w.renewSession()
+			default:
+				fmt.Println("skip...")
+			}
+		}
+
 		select {
 		case <-w.stopChan:
 			w.doneStoppingChan <- struct{}{}
-			w.renewSession(sessionTimer)
 			return
 		case <-w.drainChan:
 			drained = true
 			timer.Reset(0)
-			w.renewSession(sessionTimer)
 		case <-timer.C:
 			job, err := w.fetchJob()
 			if err != nil {
-				w.ctx.LE("work.fetch", err)
+				w.ctx.LE("worker.fetch", err)
 				timer.Reset(10 * time.Millisecond)
 			} else if job != nil {
 				w.processJob(job)
@@ -213,24 +236,15 @@ func (w *Worker) loop() {
 				}
 				timer.Reset(time.Duration(w.sleepBackoffs[idx]) * time.Millisecond)
 			}
-			w.renewSession(sessionTimer)
-		default:
-			w.renewSession(sessionTimer)
 		}
 	}
 }
 
-func (w *Worker) renewSession(timer *time.Timer) {
-	apiCtx := w.ctx
-	apiCtx.Request("POST", "", nil)
-	select {
-	case <-timer.C:
-		// TODO renew the LIVY session by REST API
-		fmt.Println("the interactive session renewing")
-		timer.Reset(time.Duration(w.sessionRenewIntervalSeconds) * time.Second)
-	default:
-		fmt.Println("session not reach limit")
-	}
+func (w *Worker) renewSession() {
+	api := w.ctx.Api()
+	api.Request("POST", "", nil)
+	// TODO renew the LIVY session by REST API
+	fmt.Println("the interactive session renewing")
 }
 
 func (w *Worker) fetchJob() (*task.Job, error) {
@@ -244,7 +258,7 @@ func (w *Worker) fetchJob() (*task.Job, error) {
 		scriptArgs = append(scriptArgs, s.RedisJobs, s.RedisJobsInProg, s.RedisJobsPaused, s.RedisJobsLock, s.RedisJobsLockInfo, s.RedisJobsMaxConcurrency) // KEYS[1-6 * N]
 	}
 	scriptArgs = append(scriptArgs, w.poolID) // ARGV[1]
-	conn := w.pool.Get()
+	conn := w.ctx.Redis().Get()
 	defer conn.Close()
 
 	values, err := redis.Values(w.redisFetchScript.Do(conn, scriptArgs...))
@@ -292,14 +306,14 @@ func (w *Worker) processJob(job *task.Job) {
 		}
 	}
 	var runErr error
-	jt := w.jobTypes[job.Name]
+	jt := w.jobType
 	if jt == nil {
 		runErr = fmt.Errorf("stray task: no handler")
 		w.ctx.LE("process_job.stray", runErr)
 	} else {
 		w.ObserveStarted(job.Name, job.ID, job.Args)
 		job.Observer = w.Observer // for Checkin
-		_, runErr = runner.RunJob(job, w.contextType, w.middleware, jt)
+		runErr = handler.Execute(w.ctx, w.middleware, jt, job)
 		w.ObserveDone(job.Name, job.ID, runErr)
 	}
 
@@ -320,23 +334,23 @@ func (w *Worker) getAndDeleteUniqueJob(job *task.Job) *task.Job {
 	} else { // For jobs put in queue prior to this change. In the future this can be deleted as there will always be a UniqueKey
 		uniqueKey, err = models.RedisKeyUniqueJob(w.namespace, job.Name, job.Args)
 		if err != nil {
-			w.ctx.LE("work.delete_unique_job.key", err)
+			w.ctx.LE("worker.delete_unique_job.key", err)
 			return nil
 		}
 	}
 
-	conn := w.pool.Get()
+	conn := w.ctx.Redis().Get()
 	defer conn.Close()
 
 	rawJSON, err := redis.Bytes(conn.Do("GET", uniqueKey))
 	if err != nil {
-		w.ctx.LE("work.delete_unique_job.get", err)
+		w.ctx.LE("worker.delete_unique_job.get", err)
 		return nil
 	}
 
 	_, err = conn.Do("DEL", uniqueKey)
 	if err != nil {
-		w.ctx.LE("work.delete_unique_job.del", err)
+		w.ctx.LE("worker.delete_unique_job.del", err)
 		return nil
 	}
 
@@ -349,7 +363,7 @@ func (w *Worker) getAndDeleteUniqueJob(job *task.Job) *task.Job {
 	// The task pulled off the queue was just a placeholder with no args, so replace it
 	jobWithArgs, err := task.NewJob(rawJSON, job.DequeuedFrom, job.InProgQueue)
 	if err != nil {
-		w.ctx.LE("work.delete_unique_job.updated_job", err)
+		w.ctx.LE("worker.delete_unique_job.updated_job", err)
 		return nil
 	}
 
@@ -357,7 +371,7 @@ func (w *Worker) getAndDeleteUniqueJob(job *task.Job) *task.Job {
 }
 
 func (w *Worker) removeJobFromInProgress(job *task.Job, fate terminateOp) {
-	conn := w.pool.Get()
+	conn := w.ctx.Redis().Get()
 	defer conn.Close()
 
 	conn.Send("MULTI")
@@ -369,7 +383,7 @@ func (w *Worker) removeJobFromInProgress(job *task.Job, fate terminateOp) {
 	conn.Send("HINCRBY", models.RedisKey2JobLockInfo(w.namespace, job.Name), w.poolID, -1)
 	fate(conn)
 	if _, err := conn.Do("EXEC"); err != nil {
-		w.ctx.LE("work.remove_job_from_in_progress.lrem", err)
+		w.ctx.LE("worker.remove_job_from_in_progress.lrem", err)
 	}
 }
 
@@ -379,7 +393,7 @@ func terminateOnly(_ redis.Conn) { return }
 func terminateAndRetry(w *Worker, jt *task.JobType, job *task.Job) terminateOp {
 	rawJSON, err := job.Serialize()
 	if err != nil {
-		w.ctx.LE("work.terminate_and_retry.serialize", err)
+		w.ctx.LE("worker.terminate_and_retry.serialize", err)
 		return terminateOnly
 	}
 	return func(conn redis.Conn) {
@@ -389,7 +403,7 @@ func terminateAndRetry(w *Worker, jt *task.JobType, job *task.Job) terminateOp {
 func terminateAndDead(w *Worker, job *task.Job) terminateOp {
 	rawJSON, err := job.Serialize()
 	if err != nil {
-		w.ctx.LE("work.terminate_and_dead.serialize", err)
+		w.ctx.LE("worker.terminate_and_dead.serialize", err)
 		return terminateOnly
 	}
 	return func(conn redis.Conn) {

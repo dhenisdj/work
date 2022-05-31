@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/execute/observe"
+	"github.com/dhenisdj/scheduler/component/common/entities"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"github.com/robfig/cron/v3"
 	"math"
@@ -16,7 +17,9 @@ import (
 type Job struct {
 	// Inputs when making a new task
 	Name       string                 `json:"name,omitempty"`
+	Account    entities.Account       `json:"account"`
 	ID         string                 `json:"id"`
+	SessionID  int                    `json:"sessionID"`
 	EnqueuedAt int64                  `json:"t"`
 	Args       map[string]interface{} `json:"args"`
 	Unique     bool                   `json:"unique,omitempty"`

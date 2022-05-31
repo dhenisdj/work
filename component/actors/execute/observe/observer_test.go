@@ -3,17 +3,17 @@ package observe
 import (
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.New()
+var ctx = context.New("test_sg", true)
 
 func TestObserverStarted(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
@@ -23,7 +23,7 @@ func TestObserverStarted(t *testing.T) {
 	utils.SetNowEpochSecondsMock(tMock)
 	defer utils.ResetNowEpochSecondsMock()
 
-	observer := NewObserver(ctx, ns, pool, "abcd")
+	observer := NewObserver(ctx, ns, "abcd")
 	observer.Start()
 	observer.ObserveStarted("foo", "bar", task.Q{"a": 1, "b": "wat"})
 	//observe.observeDone("foo", "bar", nil)
@@ -45,7 +45,7 @@ func TestObserverStartedDone(t *testing.T) {
 	utils.SetNowEpochSecondsMock(tMock)
 	defer utils.ResetNowEpochSecondsMock()
 
-	observer := NewObserver(ctx, ns, pool, "abcd")
+	observer := NewObserver(ctx, ns, "abcd")
 	observer.Start()
 	observer.ObserveStarted("foo", "bar", task.Q{"a": 1, "b": "wat"})
 	observer.ObserveDone("foo", "bar", nil)
@@ -60,7 +60,7 @@ func TestObserverCheckin(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 
-	observer := NewObserver(ctx, ns, pool, "abcd")
+	observer := NewObserver(ctx, ns, "abcd")
 	observer.Start()
 
 	tMock := int64(1425263401)
@@ -87,7 +87,7 @@ func TestObserverCheckinFromJob(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 
-	observer := NewObserver(ctx, ns, pool, "abcd")
+	observer := NewObserver(ctx, ns, "abcd")
 	observer.Start()
 
 	tMock := int64(1425263401)

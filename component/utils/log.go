@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"git.garena.com/shopee/feed/comm_lib/logkit"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -28,6 +29,33 @@ type Logger interface {
 	W(msg string)
 	E(msg string)
 	F(msg string)
+}
+
+const (
+	logMaxSize      = 100
+	logBackups      = 200
+	logLevel        = "info"
+	logEnableCaller = true
+)
+
+func InitLogkit(env string) {
+	logEnableConsole := false
+	if env != "uat" || env != "live" {
+		logEnableConsole = true
+	}
+	logPath := "log/"
+	conf := make([]logkit.Option, 0, 0)
+	conf = append(conf, logkit.Path(logPath))
+	conf = append(conf, logkit.MaxSize(logMaxSize))
+	conf = append(conf, logkit.MaxBackups(logBackups))
+	conf = append(conf, logkit.EnableCaller(logEnableCaller))
+	conf = append(conf, logkit.EnableConsole(logEnableConsole))
+	logkit.SetLevel(logLevel)
+	if err := logkit.Init(conf...); err != nil {
+		errMsg := fmt.Sprintf("logkit init error! err: %v", err)
+		fmt.Println(errMsg)
+	}
+	logkit.Info("logkit init succ")
 }
 
 type Log struct {

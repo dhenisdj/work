@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/md5"
 	"fmt"
+	"github.com/gomodule/redigo/redis"
 	"io"
 	rand2 "math/rand"
 	"net"
@@ -11,6 +12,32 @@ import (
 	"strings"
 	"time"
 )
+
+func CleanKeyspace(namespace string, pool *redis.Pool) {
+	conn := pool.Get()
+	defer conn.Close()
+
+	keys, err := redis.Strings(conn.Do("KEYS", namespace+"*"))
+	if err != nil {
+		panic("could not get keys: " + err.Error())
+	}
+	for _, k := range keys {
+		if _, err := conn.Do("DEL", k); err != nil {
+			panic("could not del: " + err.Error())
+		}
+	}
+}
+
+func ValidateEnv(env string) bool {
+	env = strings.ToLower(env)
+	if env == "live" || env == "uat" {
+		return true
+	}
+	if !(strings.Contains(env, "test") && strings.Contains(env, "_")) {
+		panic("Test env for configuration initialization key must be test_{cid} format\n")
+	}
+	return true
+}
 
 func Contain(target interface{}, obj interface{}) bool {
 	targetValue := reflect.ValueOf(target)
@@ -40,6 +67,9 @@ func CreateNonce() string {
 
 // ValidateContextType will panic if context is invalid
 func ValidateContextType(ctxType reflect.Type) {
+	if ctxType.Kind() == reflect.Ptr {
+		ctxType = ctxType.Elem()
+	}
 	if ctxType.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("work: Context %s needs to be a struct type", ctxType.Kind()))
 	}
@@ -72,8 +102,8 @@ func InstructiveMessage(vfn reflect.Value, addingType string, yourType string, a
 	str += "* func YourFunctionName(" + args + ") error\n"
 	str += "*\n"
 	str += "* // If you want your " + yourType + " to accept a context:\n"
-	str += "* func (c *" + ctxString + ") YourFunctionName(" + args + ") error  // or,\n"
-	str += "* func YourFunctionName(c *" + ctxString + ", " + args + ") error\n"
+	str += "* func (c " + ctxString + ") YourFunctionName(" + args + ") error  // or,\n"
+	str += "* func YourFunctionName(c " + ctxString + ", " + args + ") error\n"
 	str += "*\n"
 	str += "* Unfortunately, your function has this signature: " + vfn.Type().String() + "\n"
 	str += "*\n"
@@ -89,7 +119,6 @@ func GetIP() (ip string, err error) {
 		return
 	}
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	fmt.Println(localAddr.String())
 	ip = strings.Split(localAddr.String(), ":")[0]
 	return
 }

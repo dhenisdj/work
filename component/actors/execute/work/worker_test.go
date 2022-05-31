@@ -5,20 +5,19 @@ import (
 	"github.com/dhenisdj/scheduler/component/actors/enqueue"
 	pool2 "github.com/dhenisdj/scheduler/component/actors/pool"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.New()
+var ctx = context.New("test_sg", true)
 
 func TestWorkerBasics(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
@@ -62,7 +61,7 @@ func TestWorkerBasics(t *testing.T) {
 		},
 	}
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue(job1, task.Q{"a": 1})
 	assert.Nil(t, err)
 	_, err = enqueuer.Enqueue(job2, task.Q{"a": 2})
@@ -77,7 +76,6 @@ func TestWorkerBasics(t *testing.T) {
 		"1",
 		WithSingleSession(),
 		WithContext(ctx),
-		WithRedis(pool),
 	)
 	w.UpdateMiddlewareAndJobTypes(nil, jobTypes)
 	w.start()
@@ -125,7 +123,7 @@ func TestWorkerInProgress(t *testing.T) {
 		},
 	}
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue(job1, task.Q{"a": 1})
 	assert.Nil(t, err)
 
@@ -136,7 +134,6 @@ func TestWorkerInProgress(t *testing.T) {
 		"1",
 		WithSingleSession(),
 		WithContext(ctx),
-		WithRedis(pool),
 	)
 	w.UpdateMiddlewareAndJobTypes(nil, jobTypes)
 	w.start()
@@ -186,7 +183,7 @@ func TestWorkerRetry(t *testing.T) {
 		},
 	}
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue(job1, task.Q{"a": 1})
 	assert.Nil(t, err)
 	w := NewWorker(
@@ -196,7 +193,6 @@ func TestWorkerRetry(t *testing.T) {
 		"1",
 		WithSingleSession(),
 		WithContext(ctx),
-		WithRedis(pool),
 	)
 	w.UpdateMiddlewareAndJobTypes(nil, jobTypes)
 	w.start()
@@ -247,7 +243,7 @@ func TestWorkerRetryWithCustomBackoff(t *testing.T) {
 		},
 	}
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue(job1, task.Q{"a": 1})
 	assert.Nil(t, err)
 	w := NewWorker(
@@ -257,7 +253,6 @@ func TestWorkerRetryWithCustomBackoff(t *testing.T) {
 		"1",
 		WithSingleSession(),
 		WithContext(ctx),
-		WithRedis(pool),
 	)
 	w.UpdateMiddlewareAndJobTypes(nil, jobTypes)
 	w.start()
@@ -311,7 +306,7 @@ func TestWorkerDead(t *testing.T) {
 		},
 	}
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue(job1, nil)
 	assert.Nil(t, err)
 	_, err = enqueuer.Enqueue(job2, nil)
@@ -323,7 +318,6 @@ func TestWorkerDead(t *testing.T) {
 		"1",
 		WithSingleSession(),
 		WithContext(ctx),
-		WithRedis(pool),
 	)
 	w.UpdateMiddlewareAndJobTypes(nil, jobTypes)
 	w.start()
@@ -374,7 +368,7 @@ func TestWorkersPaused(t *testing.T) {
 		},
 	}
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue(job1, task.Q{"a": 1})
 	assert.Nil(t, err)
 
@@ -385,7 +379,6 @@ func TestWorkersPaused(t *testing.T) {
 		"1",
 		WithSingleSession(),
 		WithContext(ctx),
-		WithRedis(pool),
 	)
 	w.UpdateMiddlewareAndJobTypes(nil, jobTypes)
 	// pause the jobs prior to starting
@@ -429,27 +422,16 @@ func TestWorkersPaused(t *testing.T) {
 // Test that in the case of an unavailable Redis server,
 // the work loop exits in the case of a WorkerPool.Stop
 func TestStop(t *testing.T) {
-	configuration := config.InitConfig("test")
-	redisPool := &redis.Pool{
-		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", "notworking:6379", redis.DialConnectTimeout(1*time.Second))
-			if err != nil {
-				return nil, err
-			}
-			return c, nil
-		},
-	}
-	wp := pool2.NewWorkerPool(context.New(), configuration, redisPool)
+	wp := pool2.NewWorkerPool(context.New("test_sg", true))
 	wp.Start()
 	wp.Stop()
 }
 
 func BenchmarkJobProcessing(b *testing.B) {
-	configuration := config.InitConfig("test")
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 
 	for i := 0; i < b.N; i++ {
 		_, err := enqueuer.Enqueue("wat", nil)
@@ -458,7 +440,7 @@ func BenchmarkJobProcessing(b *testing.B) {
 		}
 	}
 
-	wp := pool2.NewWorkerPool(ctx, configuration, pool)
+	wp := pool2.NewWorkerPool(ctx)
 	wp.Job("wat", func(c *helper.TestContext, job *task.Job) error {
 		return nil
 	})
@@ -478,13 +460,11 @@ type emptyCtx struct{}
 // drained before returning.
 // https://github.com/dhenisdj/scheduler/issues/24
 func TestWorkerPoolStop(t *testing.T) {
-	configuration := config.InitConfig("test")
 	ns := "will_it_end"
-	pool := helper.NewTestPool(":6379")
 	var started, stopped int32
 	num_iters := 30
 
-	wp := pool2.NewWorkerPool(ctx, configuration, pool)
+	wp := pool2.NewWorkerPool(ctx)
 
 	wp.Job("sample_job", func(c *emptyCtx, job *task.Job) error {
 		atomic.AddInt32(&started, 1)
@@ -493,7 +473,7 @@ func TestWorkerPoolStop(t *testing.T) {
 		return nil
 	})
 
-	var enqueuer = enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	var enqueuer = enqueue.NewEnqueuer(ctx, ns, "", "")
 
 	for i := 0; i <= num_iters; i++ {
 		enqueuer.Enqueue("sample_job", task.Q{})

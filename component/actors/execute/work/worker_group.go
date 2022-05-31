@@ -12,8 +12,8 @@ type WorkerGroup struct {
 
 type WorkerGroupOption func(wg *WorkerGroup)
 
-func NewWorkerGroup(env, namespace, poolID string, opts ...group.GroupOption) *WorkerGroup {
-	g := group.NewGroup(env, namespace, poolID)
+func NewWorkerGroup(env, namespace, poolID, groupName string, opts ...group.GroupOption) *WorkerGroup {
+	g := group.NewGroup(env, namespace, poolID, groupName)
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -36,6 +36,7 @@ func (wg *WorkerGroup) Start() {
 	for _, w := range wg.Workers {
 		go w.start()
 	}
+	wg.Ctx.If("worker group %s for %s started!", wg.GroupID, wg.GroupName)
 }
 
 // Stop stops the workers and associated processes.

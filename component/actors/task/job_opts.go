@@ -3,7 +3,6 @@ package task
 import (
 	"encoding/json"
 	"fmt"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/entities"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"github.com/dhenisdj/scheduler/config"
@@ -25,7 +24,6 @@ type JobOptions struct {
 }
 
 type Task struct {
-	ctx           *context.Context
 	Executor      string `json:"executor"`
 	Context       string `json:"context"`
 	BusinessGroup string `json:"businessGroup"`
@@ -35,20 +33,20 @@ type Task struct {
 	Account  entities.Account `json:"account"`
 	Queue    string           `json:"queue"`
 	Name     string           `json:"name"`
+	Args     []string         `json:"args"`
 	entities.SparkResource
 	entities.SparkDependency
 	entities.SparkConf `json:"conf"`
 }
 
-func New(ctx *context.Context) *Task {
-	return &Task{ctx: ctx}
+func New() *Task {
+	return &Task{}
 }
 
 func (t *Task) Convert() *Job {
 	jobName := fmt.Sprintf("%s%s", t.Executor, strings.ToUpper(t.BusinessGroup))
 
 	b, _ := json.Marshal(t)
-	t.ctx.If("Task context %s", b)
 
 	var m map[string]interface{}
 
@@ -62,6 +60,7 @@ func (t *Task) Convert() *Job {
 
 	job := &Job{
 		Name:       jobName,
+		Account:    t.Account,
 		ID:         t.Name,
 		EnqueuedAt: utils.NowEpochSeconds(),
 		Args:       finalArgs,

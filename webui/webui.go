@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dhenisdj/scheduler/client"
-	context "github.com/dhenisdj/scheduler/component/common/context"
+	context2 "github.com/dhenisdj/scheduler/component/context"
 	"net/http"
 	"strconv"
 	"sync"
@@ -36,7 +36,7 @@ func NewServer(namespace string, pool *redis.Pool, hostPort string) *Server {
 	server := &Server{
 		namespace: namespace,
 		pool:      pool,
-		client:    client.NewClient(context.New(), namespace, pool),
+		client:    client.NewClient(context2.New("test_sg"), namespace, pool),
 		hostPort:  hostPort,
 		server:    manners.NewWithServer(&http.Server{Addr: hostPort, Handler: router}),
 		router:    router,

@@ -17,10 +17,12 @@ const (
 	ConfigCrm           = "crm"
 	ConfigAm            = "am"
 	ConfigAirflow       = "airflow"
+	ConfigRedis         = "redis"
 	ConfigSpark         = "spark"
 	ConfigSparkConf     = "spark.sparkConf"
-	ConfigHiveConf      = "spark.hiveConf"
+	ConfigExecutorApps  = "spark.apps"
 	ConfigSparkExecutor = "spark.executor"
+	ConfigSparkLivy     = "spark.livy"
 
 	URIInternalTaskPoll   = "/internal/task/poll"
 	URIInternalTaskUpdate = "/internal/task"
@@ -28,31 +30,22 @@ const (
 	URIDependenciesPoll   = "/open/dep_table/list"
 	URIDependenciesUpdate = "/open/dep_table/update_batch"
 
-	SchedulerNamespace = "am"
+	SchedulerNamespace = "{am}"
 	DefaultRegion      = "sg"
 	PoolKindFetcher    = "fp"
 	PoolKindWorker     = "wp"
-	GroupKindFetcher   = "fg"
-	GroupKindWorker    = "wg"
 
-	DefaultFetcherConcurrency = 3
+	DefaultFetcherConcurrency = 1
+	DefaultAPIRetryCount      = 3
 
-	NameSpacePools        = "ps"
-	NameSpaceGroups       = "gs"
-	NameSpaceFetcherPool  = "fp"
-	NameSpaceFetcherGroup = "fg"
-	NameSpaceFetcher      = "f"
-	NameSpaceEnqueue      = "enq"
-	NameSpaceWorkerPool   = "wp"
-	NameSpaceWorkerGroup  = "wg"
-	NameSpaceWorker       = "w"
-	NameSpaceJobType      = "jts"
-	NameSpaceJob          = "jbs"
+	NameSpacePools = "ps"
+	NameSpaceJob   = "jbs"
 
 	HeartbeatPeriod = 5 * time.Second
 
-	RequeueKeysPerJob   = 4
-	FetchKeysPerJobType = 6
+	RequeueKeysPerJob        = 4
+	FetchKeysPerJobType      = 6
+	CheckKeysIsJobReachLimit = 2
 
 	HeartbeatId             = "id"
 	HeartbeatKind           = "kind"
@@ -67,6 +60,7 @@ const (
 )
 
 var SleepBackoffsInMilliseconds = []int64{0, 10, 100, 1000, 5000}
+var SleepBackoffsInSeconds = []int64{0, 1, 3, 5, 7}
 
 var FinalArgs = []string{
 	"file",
@@ -85,15 +79,12 @@ var FinalArgs = []string{
 }
 
 func InitConfig(env string) *entities.Configuration {
-	if utils.Contain(env, "_") {
-		panic("Configuration initialization key env must be {env}_{cid} format\n")
-	}
 	envs := []string{"test", "uat", "live"}
 	envRegion := strings.Split(env, "_")
-	envWithNoRegion := envRegion[0]
+	envWithNoRegion := strings.ToLower(envRegion[0])
 	region := DefaultRegion
 	if len(envRegion) > 1 {
-		region = envRegion[1]
+		region = strings.ToLower(envRegion[1])
 	}
 	flag := utils.Contain(envs, envWithNoRegion)
 	if !flag {
@@ -139,6 +130,12 @@ func InitConfig(env string) *entities.Configuration {
 		panic(fmt.Errorf("Fatal error decoding Airflow config: %w \n", err))
 	}
 
+	// Build Redis configuration
+	redis := &entities.RedisConfig{}
+	if err := config.UnmarshalKey(ConfigRedis, redis); err != nil {
+		panic(fmt.Errorf("Fatal error decoding Redis config: %w \n", err))
+	}
+
 	// Build AM configuration
 	deps := &entities.SparkDependency{}
 	if err := config.UnmarshalKey(ConfigSpark, deps); err != nil {
@@ -160,6 +157,12 @@ func InitConfig(env string) *entities.Configuration {
 		panic(fmt.Errorf("Fatal error decoding spark.sparkConf config: %w \n", err))
 	}
 
+	appConf := &entities.ExecutorAppConf{}
+	err = json.Unmarshal([]byte(config.GetString(ConfigExecutorApps)), &appConf)
+	if err != nil {
+		panic(fmt.Errorf("Fatal error decoding spark.apps config: %w \n", err))
+	}
+
 	executor := &entities.Executor{}
 	if err := config.UnmarshalKey(ConfigSparkExecutor, executor); err != nil {
 		panic(fmt.Errorf("Fatal error decoding Spark.executor config: %w \n", err))
@@ -172,20 +175,29 @@ func InitConfig(env string) *entities.Configuration {
 		}
 	}
 
+	livy := &entities.Livy{}
+	if err := config.UnmarshalKey(ConfigSparkLivy, livy); err != nil {
+		panic(fmt.Errorf("Fatal error decoding Spark.livy config: %w \n", err))
+	}
+
 	spark := &entities.SparkConfig{}
 	spark.SparkConf = sparkConf
+	spark.ExecutorAppConf = appConf
 	spark.SparkDependency = deps
 	spark.Executor = &formattedExecutor
+	spark.Livy = livy
 
 	configuration := &entities.Configuration{
-		S3:      s3,
-		Kafka:   kfk,
-		CRM:     crm,
-		AM:      am,
-		Ariflow: air,
-		Spark:   spark,
-		Env:     envWithNoRegion,
-		Region:  region,
+		NameSpace: fmt.Sprintf("{am_%s_%s}", envWithNoRegion, region),
+		S3:        s3,
+		Kafka:     kfk,
+		CRM:       crm,
+		AM:        am,
+		Airflow:   air,
+		Redis:     redis,
+		Spark:     spark,
+		Env:       envWithNoRegion,
+		Region:    region,
 	}
 
 	return configuration

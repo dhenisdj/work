@@ -1,18 +1,14 @@
 package pool
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/enqueue"
 	"github.com/dhenisdj/scheduler/component/actors/execute/fetch"
 	"github.com/dhenisdj/scheduler/component/actors/execute/group"
 	"github.com/dhenisdj/scheduler/component/actors/execute/parse"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
-	"github.com/dhenisdj/scheduler/component/common/entities"
-	"github.com/dhenisdj/scheduler/component/utils"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/config"
-	"github.com/gomodule/redigo/redis"
 	"sort"
 	"strings"
 	"sync"
@@ -27,21 +23,20 @@ type FetcherPool struct {
 
 // NewFetcherPool creates a new work pool as per the NewWorkerPool function, but permits you to specify
 // additional options such as sleep backoffs.
-func NewFetcherPool(ctx *context.Context, configuration *entities.Configuration, pool *redis.Pool) *FetcherPool {
-	if configuration == nil {
-		panic("NewFetcherPool needs a non-nil *Configuration")
-	}
+func NewFetcherPool(ctx context.Context) *FetcherPool {
+	configuration := ctx.CONF()
+	pool := ctx.Redis()
 
 	fp := &FetcherPool{
 		Pool: newPool(
-			configuration.Env,
-			config.SchedulerNamespace,
+			configuration.NameSpace,
 			config.PoolKindFetcher,
 			WithContext(ctx),
-			WithBackoffs(config.SleepBackoffsInMilliseconds),
+			WithBackoffs(config.SleepBackoffsInSeconds),
 			WithRedis(pool),
+			WithConcurrency(make(map[string]int)),
 		),
-		Parser:        parse.NewParser(ctx, configuration.Spark),
+		Parser:        parse.NewParser(ctx),
 		fetcherGroups: make(map[string]*fetch.FetcherGroup),
 	}
 
@@ -61,6 +56,7 @@ func NewFetcherPool(ctx *context.Context, configuration *entities.Configuration,
 			panic("NewFetcherPool configuration file error for session")
 		}
 		bizConcurrency := business.Concurrency
+		accounts := business.Account
 
 		appKey := amConfig.Credential.Key
 		appSecret := amConfig.Credential.Secret
@@ -68,10 +64,15 @@ func NewFetcherPool(ctx *context.Context, configuration *entities.Configuration,
 
 		for biz, _ := range bizConcurrency {
 
+			account := accounts[biz]
+
+			groupJobName := fmt.Sprintf("%s%s", executorName, strings.ToUpper(biz))
+
 			fg := fetch.NewFetcherGroup(
 				fp.env,
 				fp.Namespace,
 				fp.PoolID,
+				groupJobName,
 				appKey,
 				appSecret,
 				callBack,
@@ -83,15 +84,15 @@ func NewFetcherPool(ctx *context.Context, configuration *entities.Configuration,
 				biz = "REFERRAL"
 			}
 
-			id := utils.MakeIdentifier()
 			for i := 0; i < config.DefaultFetcherConcurrency; i++ {
-				fetcherId := fmt.Sprintf("%s.%d", id, i)
+				fetcherId := fmt.Sprintf("%s.%d", fg.GroupID, i)
 				fetcher := fetch.NewFetcher(
 					fg.Namespace,
 					fetcherId,
 					fp.PoolID,
 					fg.GroupID,
 					fetch.WithContext(ctx),
+					fetch.WithAccount(account),
 					fetch.WithEnv(fp.env),
 					fetch.WithBiz(biz),
 					fetch.WithExecutor(executorName),
@@ -99,29 +100,27 @@ func NewFetcherPool(ctx *context.Context, configuration *entities.Configuration,
 					fetch.WithCredential(credential),
 					fetch.WithBackoffs(fp.sleepBackoffs),
 					fetch.WithParser(fp.Parser),
-					fetch.WithEnqueuer(enqueue.NewEnqueuer(ctx, fg.Namespace, executorName, biz, pool)),
+					fetch.WithEnqueuer(enqueue.NewEnqueuer(ctx, fg.Namespace, executorName, biz)),
 				)
 
 				fg.Fetchers = append(fg.Fetchers, fetcher)
 			}
 
-			groupJobName := fmt.Sprintf("%s%s", executorName, strings.ToUpper(biz))
-
 			//Build task types by executor and biz
+			fp.concurrencyMap[groupJobName] = len(fg.Fetchers)
+			fp.fetcherGroups[groupJobName] = fg
 			fp.registerJob(
 				groupJobName,
 				task.JobOptions{
 					IsBatch:        session.IsBatch,
-					SkipDead:       true,
+					SkipDead:       false,
 					MaxConcurrency: uint(config.DefaultFetcherConcurrency),
 					//Backoff:        task.DefaultBackoffCalculator, This is the default calculator if not set
 				})
-
-			fp.fetcherGroups[groupJobName] = fg
 		}
 
 	}
-	ctx.If("%s Done init FetcherPool %s", fp.env, fp.PoolID)
+	ctx.If("done init FetcherPool %s", fp.PoolID)
 
 	return fp
 }
@@ -138,22 +137,24 @@ func (fp *FetcherPool) registerJob(name string, jobOpts task.JobOptions) *Fetche
 
 	fp.jobTypes[name] = jt
 
+	for jobName, fg := range fp.fetcherGroups {
+		if jobName == name {
+			for _, f := range fg.Fetchers {
+				f.UpdateJobTypes(jt)
+			}
+		}
+	}
+
 	return fp
 }
 
 // Start starts the workers and associated processes.
 func (fp *FetcherPool) Start(uri string) {
-	concurrences := make(map[string]int)
-	for k, fg := range fp.fetcherGroups {
-		currCon := len(fg.Fetchers)
-		concurrences[k] = currCon
+	fp.start(fp.fetcherIDs())
+	for _, fg := range fp.fetcherGroups {
 		fg.Start(uri)
 	}
-
-	concurrencyMap, _ := json.Marshal(concurrences)
-
-	fp.start(concurrencyMap, fp.fetcherIDs())
-	fp.Pool.ctx.If("%s Fetcher Pool %s Started!", fp.env, fp.PoolID)
+	fp.Pool.ctx.If("fetcher pool %s started with %s!", fp.PoolID, uri)
 }
 
 // Stop stops the workers and associated processes.

@@ -1,17 +1,13 @@
 package pool
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/execute/group"
 	"github.com/dhenisdj/scheduler/component/actors/execute/work"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/common/context"
-	"github.com/dhenisdj/scheduler/component/common/entities"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/handler"
-	"github.com/dhenisdj/scheduler/component/utils"
 	"github.com/dhenisdj/scheduler/config"
-	"github.com/gomodule/redigo/redis"
 	"sort"
 	"strings"
 	"sync"
@@ -25,21 +21,20 @@ type WorkerPool struct {
 
 // NewWorkerPool creates a new work pool as per the NewWorkerPool function, but permits you to specify
 // additional options such as sleep backoffs.
-func NewWorkerPool(ctx *context.Context, configuration *entities.Configuration, pool *redis.Pool) *WorkerPool {
-	if pool == nil {
-		panic("NewWorkerPool needs a non-nil *redi.Pool")
-	}
+func NewWorkerPool(ctx context.Context) *WorkerPool {
+	configuration := ctx.CONF()
+	pool := ctx.Redis()
 
 	executorConfig := configuration.Spark.Executor
-	sparkConf := configuration.Spark.SparkConf
+	sparkConf := configuration.Spark
 	wp := &WorkerPool{
 		Pool: newPool(
-			configuration.Env,
-			config.SchedulerNamespace,
+			configuration.NameSpace,
 			config.PoolKindWorker,
 			WithContext(ctx),
-			WithBackoffs(config.SleepBackoffsInMilliseconds),
+			WithBackoffs(config.SleepBackoffsInSeconds),
 			WithRedis(pool),
+			WithConcurrency(make(map[string]int)),
 		),
 		WorkerGroup: make(map[string]*work.WorkerGroup),
 	}
@@ -58,10 +53,13 @@ func NewWorkerPool(ctx *context.Context, configuration *entities.Configuration, 
 
 		for biz, concurrency := range bizConcurrency {
 
+			groupJobName := fmt.Sprintf("%s%s", executorName, strings.ToUpper(biz))
+
 			wg := work.NewWorkerGroup(
 				wp.env,
 				wp.Namespace,
 				wp.PoolID,
+				groupJobName,
 				group.WithContext(ctx),
 				group.WithRedis(pool),
 			)
@@ -70,9 +68,8 @@ func NewWorkerPool(ctx *context.Context, configuration *entities.Configuration, 
 				biz = "REFERRAL"
 			}
 
-			id := utils.MakeIdentifier()
 			if session.IsBatch {
-				workerId := fmt.Sprintf("%s.%d", id, 0)
+				workerId := fmt.Sprintf("%s.%d", wg.GroupID, 0)
 				worker := work.NewWorker(
 					wg.Namespace,
 					workerId,
@@ -80,13 +77,12 @@ func NewWorkerPool(ctx *context.Context, configuration *entities.Configuration, 
 					wp.PoolID,
 					work.WithContext(ctx),
 					work.WithBatchSession(biz, session, business, sparkConf),
-					work.WithRedis(wp.Redis),
 					work.WithBackoffs(wp.sleepBackoffs),
 				)
 				wg.Workers = append(wg.Workers, worker)
 			} else {
 				for i := 0; i < concurrency; i++ {
-					workerId := fmt.Sprintf("%s.%d", id, i)
+					workerId := fmt.Sprintf("%s.%d", wg.GroupID, i)
 					worker := work.NewWorker(
 						wg.Namespace,
 						workerId,
@@ -94,27 +90,24 @@ func NewWorkerPool(ctx *context.Context, configuration *entities.Configuration, 
 						wp.PoolID,
 						work.WithContext(ctx),
 						work.WithSingleSession(),
-						work.WithRedis(wp.Redis),
 						work.WithBackoffs(wp.sleepBackoffs),
 					)
 					wg.Workers = append(wg.Workers, worker)
 				}
 			}
 
-			groupJobName := fmt.Sprintf("%s%s", executorName, strings.ToUpper(biz))
-
 			//Build task types by executor and biz
+			wp.concurrencyMap[groupJobName] = len(wg.Workers)
+			wp.WorkerGroup[groupJobName] = wg
 			wp.JobWithOptions(
 				groupJobName,
 				task.JobOptions{
 					IsBatch:        session.IsBatch,
-					SkipDead:       true,
+					SkipDead:       false,
 					MaxConcurrency: uint(len(wg.Workers)),
 					//Backoff:        task.DefaultBackoffCalculator, This is the default calculator if not set
 				},
 				handler.Handlers[session.IsBatch])
-
-			wp.WorkerGroup[groupJobName] = wg
 		}
 
 	}
@@ -127,7 +120,7 @@ func (wp *WorkerPool) Middleware(fn interface{}) *WorkerPool {
 
 	for k, wg := range wp.WorkerGroup {
 		for _, w := range wg.Workers {
-			w.UpdateMiddlewareAndJobTypes(wp.middlewares, map[string]*task.JobType{k: wp.jobTypes[k]})
+			w.UpdateMiddlewareAndJobTypes(wp.middlewares, wp.jobTypes[k])
 		}
 	}
 
@@ -141,9 +134,11 @@ func (wp *WorkerPool) Job(name string, fn interface{}) *Pool {
 func (wp *WorkerPool) JobWithOptions(name string, jobOpts task.JobOptions, fn interface{}) *WorkerPool {
 	wp.jobWithOptions(name, jobOpts, fn)
 
-	for _, wg := range wp.WorkerGroup {
-		for _, w := range wg.Workers {
-			w.UpdateMiddlewareAndJobTypes(wp.middlewares, map[string]*task.JobType{name: wp.jobTypes[name]})
+	for jobName, wg := range wp.WorkerGroup {
+		if jobName == name {
+			for _, w := range wg.Workers {
+				w.UpdateMiddlewareAndJobTypes(wp.middlewares, wp.jobTypes[name])
+			}
 		}
 	}
 
@@ -152,15 +147,11 @@ func (wp *WorkerPool) JobWithOptions(name string, jobOpts task.JobOptions, fn in
 
 // Start starts the workers and associated processes.
 func (wp *WorkerPool) Start() {
-	concurrences := make(map[string]int)
-	for k, wg := range wp.WorkerGroup {
-		currCon := len(wg.Workers)
-		concurrences[k] = currCon
+	wp.start(wp.WorkerIDs())
+	for _, wg := range wp.WorkerGroup {
 		go wg.Start()
 	}
-	concurrencyMap, _ := json.Marshal(concurrences)
-
-	wp.start(concurrencyMap, wp.WorkerIDs())
+	wp.Pool.ctx.If("worker pool %s started!", wp.PoolID)
 }
 
 // Stop stops the workers and associated processes.

@@ -2,21 +2,22 @@ package parse
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/entities"
+	"github.com/dhenisdj/scheduler/component/context"
 	"strings"
 )
 
 type Parser struct {
 	SparkConf *entities.SparkConfig `json:"conf"`
-	ctx       *context.Context
+	ctx       context.Context
 }
 
-func NewParser(ctx *context.Context, sparkConf *entities.SparkConfig) *Parser {
+func NewParser(ctx context.Context) *Parser {
 	return &Parser{
-		SparkConf: sparkConf,
+		SparkConf: ctx.CONF().Spark,
 		ctx:       ctx,
 	}
 }
@@ -46,7 +47,7 @@ func (p *Parser) validate(task *entities.BaseTask) bool {
 }
 
 func (p *Parser) Parse(bTask *entities.BaseTask) *task.Job {
-	spark := task.New(p.ctx)
+	spark := task.New()
 
 	if !p.validate(bTask) {
 		return nil
@@ -68,27 +69,40 @@ func (p *Parser) Parse(bTask *entities.BaseTask) *task.Job {
 	businessResource := es[executorName]
 	business := businessResource.Business
 	queue := business.Queue[bizName]
-	account := business.Account[bizName]
+	account := *business.Account[bizName]
 
 	resource := *businessResource.Resource
 	spark.SparkResource = resource
 
-	spark.Name = fmt.Sprintf("%s.%s.%s.%s.%d", bTask.Env, region, executorName, bizName, bTask.Id)
+	if bTask.Env == "live" || bTask.Env == "uat" {
+		spark.Name = fmt.Sprintf("%s.%s.%d", p.ctx.CONF().Env, executorName+strings.ToUpper(bizName), bTask.Id)
+	} else {
+		spark.Name = fmt.Sprintf("%s.%s.%s.%d", p.ctx.CONF().Env, p.ctx.CONF().Region, executorName+strings.ToUpper(bizName), bTask.Id)
+	}
 	spark.Business = bizName
 	spark.Account = account
 	spark.Queue = queue
 	spark.SparkDependency = *p.SparkConf.SparkDependency
 	spark.SparkConf = *p.SparkConf.SparkConf
 
-	spark.Args = append(spark.Args, "--context")
-	spark.Args = append(spark.Args, base64.StdEncoding.EncodeToString([]byte(spark.Context)))
+	var args []string
+	args = append(args, "--env")
+	if p.ctx.CONF().Env == "test" {
+		args = append(args, fmt.Sprintf("test_%s", p.ctx.CONF().Region))
+	} else {
+		args = append(args, p.ctx.CONF().Env)
+	}
+	args = append(args, "--context")
+	b, _ := json.Marshal(bTask)
+	args = append(args, base64.StdEncoding.EncodeToString(b))
+	args = append(args, "--app")
+	args = append(args, (*p.ctx.CONF().Spark.ExecutorAppConf)[executorName])
 
 	if executorName != "SyncDistributionCommon" {
-		spark.Args = append(spark.Args, "--biz")
-		spark.Args = append(spark.Args, spark.BusinessGroup)
-	} else {
-		spark.Args = append(spark.Args, "--business_name")
-		spark.Args = append(spark.Args, "REFERRAL")
+		args = append(args, "--biz")
+		args = append(args, spark.BusinessGroup)
 	}
+
+	spark.Args = args
 	return spark.Convert()
 }

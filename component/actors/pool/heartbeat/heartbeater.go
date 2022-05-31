@@ -1,24 +1,22 @@
 package heartbeat
 
 import (
+	"encoding/json"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"github.com/dhenisdj/scheduler/config"
 	"os"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/gomodule/redigo/redis"
 )
 
 type PoolHeartbeater struct {
 	poolID         string        // Pool identifier
 	namespace      string        // Namespace for redis for now eg, "am"
 	kind           string        // Kind for pool eg, ""
-	pool           *redis.Pool   // Redis pool
 	beatPeriod     time.Duration // Heartbeat duration
 	concurrencyMap []byte        // Json format {"name":concurrency}
 	jobNames       string        // String format for all task names separate by ,
@@ -27,20 +25,20 @@ type PoolHeartbeater struct {
 	hostname       string        // Host name
 	ip             string        // Host ip
 	executorIDs    string        // All ids for the execute eg, fetcherIDs workerIDs
-	ctx            *context.Context
+	ctx            context.Context
 
 	stopChan         chan struct{}
 	doneStoppingChan chan struct{}
 }
 
-func NewPoolHeartbeater(ctx *context.Context, namespace, kind, poolID string, pool *redis.Pool, jobTypes map[string]*task.JobType, concurrencyMap []byte, ids []string) *PoolHeartbeater {
+func NewPoolHeartbeater(ctx context.Context, namespace, kind, poolID string, jobTypes map[string]*task.JobType, concurrencyMap map[string]int, ids []string) *PoolHeartbeater {
+	concurrency, _ := json.Marshal(concurrencyMap)
 	h := &PoolHeartbeater{
 		poolID:           poolID,
 		namespace:        namespace,
 		kind:             kind,
-		pool:             pool,
 		beatPeriod:       config.HeartbeatPeriod,
-		concurrencyMap:   concurrencyMap,
+		concurrencyMap:   concurrency,
 		ctx:              ctx,
 		stopChan:         make(chan struct{}),
 		doneStoppingChan: make(chan struct{}),
@@ -65,6 +63,7 @@ func NewPoolHeartbeater(ctx *context.Context, namespace, kind, poolID string, po
 	h.hostname = hostName
 
 	ip, err := utils.GetIP()
+	ctx.If("heartbeat at host %s", ip)
 	if err != nil {
 		ctx.LE("heartbeat.hostname", err)
 		ip = "127.0.0.1"
@@ -100,7 +99,7 @@ func (h *PoolHeartbeater) loop() {
 }
 
 func (h *PoolHeartbeater) heartbeat() {
-	conn := h.pool.Get()
+	conn := h.ctx.Redis().Get()
 	defer conn.Close()
 
 	poolsKey := models.RedisKey2Pools(h.namespace)
@@ -126,7 +125,7 @@ func (h *PoolHeartbeater) heartbeat() {
 }
 
 func (h *PoolHeartbeater) removeHeartbeat() {
-	conn := h.pool.Get()
+	conn := h.ctx.Redis().Get()
 	defer conn.Close()
 
 	poolsKey := models.RedisKey2Pools(h.namespace)

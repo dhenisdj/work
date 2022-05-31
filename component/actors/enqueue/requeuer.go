@@ -2,8 +2,8 @@ package enqueue
 
 import (
 	"fmt"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"time"
 
@@ -12,8 +12,7 @@ import (
 
 type Requeuer struct {
 	namespace string
-	pool      *redis.Pool
-	ctx       *context.Context
+	ctx       context.Context
 
 	redisRequeueScript *redis.Script
 	redisRequeueArgs   []interface{}
@@ -25,7 +24,7 @@ type Requeuer struct {
 	doneDrainingChan chan struct{}
 }
 
-func NewRequeuer(ctx *context.Context, namespace string, pool *redis.Pool, requeueKey string, jobNames []string) *Requeuer {
+func NewRequeuer(ctx context.Context, namespace string, requeueKey string, jobNames []string) *Requeuer {
 	args := make([]interface{}, 0, len(jobNames)+2+2)
 	args = append(args, requeueKey)                         // KEY[1]
 	args = append(args, models.RedisKey2JobDead(namespace)) // KEY[2]
@@ -37,7 +36,6 @@ func NewRequeuer(ctx *context.Context, namespace string, pool *redis.Pool, reque
 
 	return &Requeuer{
 		namespace: namespace,
-		pool:      pool,
 		ctx:       ctx,
 
 		redisRequeueScript: redis.NewScript(len(jobNames)+2, models.RedisLuaZremLpushCmd),
@@ -89,7 +87,7 @@ func (r *Requeuer) loop() {
 }
 
 func (r *Requeuer) process() bool {
-	conn := r.pool.Get()
+	conn := r.ctx.Redis().Get()
 	defer conn.Close()
 
 	r.redisRequeueArgs[len(r.redisRequeueArgs)-1] = utils.NowEpochSeconds()

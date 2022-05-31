@@ -3,20 +3,17 @@ package observe
 import (
 	"encoding/json"
 	"fmt"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"time"
-
-	"github.com/gomodule/redigo/redis"
 )
 
 // An Observer observes a single work. Each work has its own observer.
 type Observer struct {
 	namespace string
-	ctx       *context.Context
+	ctx       context.Context
 	workerID  string
-	pool      *redis.Pool
 
 	// nil: worker isn't doing anything that we know of
 	// not nil: the last started observation that we received on the channel.
@@ -66,12 +63,11 @@ type observation struct {
 
 const observerBufferSize = 1024
 
-func NewObserver(ctx *context.Context, namespace string, pool *redis.Pool, workerID string) *Observer {
+func NewObserver(ctx context.Context, namespace string, workerID string) *Observer {
 	return &Observer{
 		namespace:        namespace,
 		ctx:              ctx,
 		workerID:         workerID,
-		pool:             pool,
 		observationsChan: make(chan *observation, observerBufferSize),
 
 		stopChan:         make(chan struct{}),
@@ -188,7 +184,7 @@ func (o *Observer) process(obv *observation) {
 }
 
 func (o *Observer) writeStatus(obv *observation) error {
-	conn := o.pool.Get()
+	conn := o.ctx.Redis().Get()
 	defer conn.Close()
 
 	key := models.RedisKey2Observation(o.namespace, o.workerID)
@@ -223,6 +219,7 @@ func (o *Observer) writeStatus(obv *observation) error {
 			"job_name", obv.jobName,
 			"job_id", obv.jobID,
 			"started_at", obv.startedAt,
+			"status", obv.kind,
 			"args", argsJSON,
 		)
 

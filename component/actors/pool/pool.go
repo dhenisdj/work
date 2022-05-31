@@ -5,8 +5,8 @@ import (
 	"github.com/dhenisdj/scheduler/component/actors/pool/heartbeat"
 	"github.com/dhenisdj/scheduler/component/actors/pool/reape"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	"github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/handler"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"github.com/dhenisdj/scheduler/config"
@@ -28,15 +28,16 @@ type PoolOptions struct {
 // You can attach jobs and middlware to them. You can start and stop them.
 // Based on their concurrency setting, they'll spin up N work goroutines.
 type Pool struct {
-	kind          string // fetcherPool workerPool ...
-	PoolID        string
-	Namespace     string // eg, "am" which represents a Namespace within redis
-	env           string
-	Redis         *redis.Pool
-	sleepBackoffs []int64
+	kind           string // fetcherPool workerPool ...
+	PoolID         string
+	Namespace      string // eg, "am" which represents a Namespace within redis
+	env            string
+	Redis          *redis.Pool
+	sleepBackoffs  []int64
+	concurrencyMap map[string]int
 
 	contextType reflect.Type
-	ctx         *context.Context
+	ctx         context.Context
 	jobTypes    map[string]*task.JobType
 	middlewares []*handler.MiddlewareHandler
 	started     bool
@@ -52,16 +53,23 @@ type Pool struct {
 
 type PoolOption func(p *Pool)
 
-func WithContext(ctx *context.Context) PoolOption {
+func WithContext(ctx context.Context) PoolOption {
 	return func(p *Pool) {
 		p.ctx = ctx
-		p.contextType = reflect.TypeOf(*ctx)
+		p.contextType = reflect.TypeOf(ctx)
+		p.env = ctx.CONF().Env
 	}
 }
 
 func WithBackoffs(sleepBackoffs []int64) PoolOption {
 	return func(f *Pool) {
 		f.sleepBackoffs = sleepBackoffs
+	}
+}
+
+func WithConcurrency(concurrency map[string]int) PoolOption {
+	return func(f *Pool) {
+		f.concurrencyMap = concurrency
 	}
 }
 
@@ -73,12 +81,11 @@ func WithRedis(pool *redis.Pool) PoolOption {
 
 // newPool creates a new base pool, and permits you to specify
 // additional options such as sleep backoffs.
-func newPool(env, namespace, kind string, opts ...PoolOption) *Pool {
+func newPool(namespace, kind string, opts ...PoolOption) *Pool {
 	p := &Pool{
 		kind:      kind,
 		PoolID:    utils.MakeIdentifier(),
 		Namespace: namespace,
-		env:       env,
 		jobTypes:  make(map[string]*task.JobType),
 	}
 
@@ -93,7 +100,7 @@ func newPool(env, namespace, kind string, opts ...PoolOption) *Pool {
 	utils.ValidateContextType(p.contextType)
 
 	if len(p.sleepBackoffs) == 0 {
-		p.sleepBackoffs = config.SleepBackoffsInMilliseconds
+		p.sleepBackoffs = config.SleepBackoffsInSeconds
 	}
 
 	return p
@@ -168,7 +175,7 @@ func (pl *Pool) periodicallyEnqueue(spec string, jobName string) *Pool {
 }
 
 // Start starts the workers and associated processes.
-func (p *Pool) start(concurrences []byte, ids []string) {
+func (p *Pool) start(ids []string) {
 	if p.started {
 		return
 	}
@@ -178,12 +185,12 @@ func (p *Pool) start(concurrences []byte, ids []string) {
 	p.writeJobsConfigToRedis()
 	go p.writeValidJobsToRedis()
 
-	p.heartbeater = heartbeat.NewPoolHeartbeater(p.ctx, p.Namespace, p.kind, p.PoolID, p.Redis, p.jobTypes, concurrences, ids)
+	p.heartbeater = heartbeat.NewPoolHeartbeater(p.ctx, p.Namespace, p.kind, p.PoolID, p.jobTypes, p.concurrencyMap, ids)
 	p.heartbeater.Start()
-	p.startRequeuers(p.jobTypes, p.Redis)
+	p.startRequeuers(p.jobTypes)
 	p.periodicEnqueuer = enqueue.NewPeriodicEnqueuer(p.ctx, p.Namespace, p.Redis, p.periodicJobs)
 	p.periodicEnqueuer.Start()
-	p.ctx.If("Pool Started for %s", p.kind)
+	p.ctx.If("base pool %s started for %s", p.PoolID, p.kind)
 }
 
 // Stop stops the workers and associated processes.
@@ -195,18 +202,18 @@ func (p *Pool) stop() {
 	p.periodicEnqueuer.Stop()
 }
 
-func (p *Pool) startRequeuers(jobTypes map[string]*task.JobType, pool *redis.Pool) {
+func (p *Pool) startRequeuers(jobTypes map[string]*task.JobType) {
 	jobNames := make([]string, 0, len(jobTypes))
 	for k := range jobTypes {
 		jobNames = append(jobNames, k)
 	}
-	p.retrier = enqueue.NewRequeuer(p.ctx, p.Namespace, pool, models.RedisKey2JobRetry(p.Namespace), jobNames)
-	p.scheduler = enqueue.NewRequeuer(p.ctx, p.Namespace, pool, models.RedisKey2JobScheduled(p.Namespace), jobNames)
-	p.DeadPoolReaper = reape.NewDeadPoolReaper(p.ctx, p.Namespace, pool, jobNames)
+	p.retrier = enqueue.NewRequeuer(p.ctx, p.Namespace, models.RedisKey2JobRetry(p.Namespace), jobNames)
+	p.scheduler = enqueue.NewRequeuer(p.ctx, p.Namespace, models.RedisKey2JobScheduled(p.Namespace), jobNames)
+	p.DeadPoolReaper = reape.NewDeadPoolReaper(p.ctx, p.Namespace, jobNames)
 	p.retrier.Start()
 	p.scheduler.Start()
 	p.DeadPoolReaper.Start()
-	p.ctx.If("%s FetcherPool Requeuers Started!", p.env)
+	p.ctx.I("requeuers started!")
 }
 
 func (p *Pool) writeValidJobsToRedis() {
@@ -224,7 +231,7 @@ func (p *Pool) writeValidJobsToRedis() {
 	}
 
 	if _, err := conn.Do("SADD", jobNames...); err != nil {
-		p.ctx.LE("Write Valid Jobs", err)
+		p.ctx.LE("write valid jobs", err)
 	}
 }
 
@@ -272,13 +279,13 @@ func applyDefaultsAndValidate(jobOpts task.JobOptions) task.JobOptions {
 
 func ValidateHandlerType(ctxType reflect.Type, vfn reflect.Value) {
 	if !IsValidHandlerType(ctxType, vfn) {
-		panic(utils.InstructiveMessage(vfn, "a handler", "handler", "task *work.Job", ctxType))
+		panic(utils.InstructiveMessage(vfn, "a handler", "handler", "job *task.Job", ctxType))
 	}
 }
 
 func ValidateMiddlewareType(ctxType reflect.Type, vfn reflect.Value) {
 	if !IsValidMiddlewareType(ctxType, vfn) {
-		panic(utils.InstructiveMessage(vfn, "middleware", "middleware", "task *work.Job, next NextMiddlewareFunc", ctxType))
+		panic(utils.InstructiveMessage(vfn, "middleware", "middleware", "job *task.Job, next NextMiddlewareFunc", ctxType))
 	}
 }
 
@@ -309,7 +316,10 @@ func IsValidHandlerType(ctxType reflect.Type, vfn reflect.Value) bool {
 			return false
 		}
 	} else if numIn == 2 {
-		if fnType.In(0) != reflect.PtrTo(ctxType) {
+		//if fnType.In(0) != reflect.PtrTo(ctxType) {
+		//	return false
+		//}
+		if !ctxType.Implements(fnType.In(0)) {
 			return false
 		}
 		if fnType.In(1) != reflect.TypeOf(j) {

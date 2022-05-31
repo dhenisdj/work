@@ -6,7 +6,7 @@ import (
 	"github.com/dhenisdj/scheduler/component/actors/enqueue"
 	"github.com/dhenisdj/scheduler/component/actors/pool"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/config"
 	"math/rand"
 	"time"
@@ -42,7 +42,7 @@ func main() {
 
 	go func() {
 		for {
-			en := enqueue.NewEnqueuer(context.New(), config.SchedulerNamespace, "", "", redis)
+			en := enqueue.NewEnqueuer(context.New("test_sg", true), config.SchedulerNamespace, "", "")
 			for i := 0; i < 20; i++ {
 				en.Enqueue("foobar", task.Q{"i": i})
 			}
@@ -51,8 +51,7 @@ func main() {
 		}
 	}()
 
-	configuration := config.InitConfig("test_sg")
-	wp := pool.NewWorkerPool(context.New(), configuration, redis)
+	wp := pool.NewWorkerPool(context.New("test_sg", true))
 	wp.Job("foobar", epsilonHandler)
 	wp.Start()
 

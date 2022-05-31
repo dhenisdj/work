@@ -2,8 +2,8 @@ package reape
 
 import (
 	"fmt"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/config"
 	"math/rand"
 	"strings"
@@ -20,8 +20,7 @@ const (
 
 type DeadPoolReaper struct {
 	namespace   string
-	ctx         *context.Context
-	pool        *redis.Pool
+	ctx         context.Context
 	deadTime    time.Duration
 	reapPeriod  time.Duration
 	curJobTypes []string
@@ -30,11 +29,15 @@ type DeadPoolReaper struct {
 	doneStoppingChan chan struct{}
 }
 
-func NewDeadPoolReaper(ctx *context.Context, namespace string, pool *redis.Pool, curJobTypes []string) *DeadPoolReaper {
+type deadPoolInfo struct {
+	jobTypes  []string
+	workerIds []string
+}
+
+func NewDeadPoolReaper(ctx context.Context, namespace string, curJobTypes []string) *DeadPoolReaper {
 	return &DeadPoolReaper{
 		namespace:        namespace,
 		ctx:              ctx,
-		pool:             pool,
 		deadTime:         deadTime,
 		reapPeriod:       reapPeriod,
 		curJobTypes:      curJobTypes,
@@ -81,17 +84,17 @@ func (r *DeadPoolReaper) reap() error {
 		return err
 	}
 
-	conn := r.pool.Get()
+	conn := r.ctx.Redis().Get()
 	defer conn.Close()
 
 	workerPoolsKey := models.RedisKey2Pools(r.namespace)
 
 	// Cleanup all dead pools
-	for deadPoolID, jobTypes := range deadPoolIDs {
-		lockJobTypes := jobTypes
+	for deadPoolID, deadInfo := range deadPoolIDs {
+		lockJobTypes := deadInfo.jobTypes
 		// if we found jobs from the heartbeat, requeue them and remove the heartbeat
-		if len(jobTypes) > 0 {
-			r.requeueInProgressJobs(deadPoolID, jobTypes)
+		if len(deadInfo.jobTypes) > 0 {
+			r.requeueInProgressJobs(deadPoolID, deadInfo.jobTypes)
 			if _, err = conn.Do("DEL", models.RedisKey2Heartbeat(r.namespace, deadPoolID)); err != nil {
 				return err
 			}
@@ -107,8 +110,26 @@ func (r *DeadPoolReaper) reap() error {
 		if err = r.cleanStaleLockInfo(deadPoolID, lockJobTypes); err != nil {
 			return err
 		}
+		// Cleanup dead observers for dead workers only in workerPool
+		if len(deadInfo.workerIds) > 0 {
+			if err = r.cleanDeadObservers(deadInfo.workerIds); err != nil {
+				return err
+			}
+		}
 	}
 
+	return nil
+}
+
+func (r *DeadPoolReaper) cleanDeadObservers(workerIds []string) error {
+	conn := r.ctx.Redis().Get()
+	for _, workerId := range workerIds {
+		conn.Send("DEL", models.RedisKey2Observation(r.ctx.CONF().NameSpace, workerId))
+	}
+	if err := conn.Flush(); err != nil {
+		r.ctx.Wf("dead observers for dead workers clean failed")
+		return err
+	}
 	return nil
 }
 
@@ -122,7 +143,7 @@ func (r *DeadPoolReaper) cleanStaleLockInfo(poolID string, jobTypes []string) er
 	}
 	scriptArgs = append(scriptArgs, poolID) // ARGV[1]
 
-	conn := r.pool.Get()
+	conn := r.ctx.Redis().Get()
 	defer conn.Close()
 	if _, err := redisReapLocksScript.Do(conn, scriptArgs...); err != nil {
 		return err
@@ -142,7 +163,7 @@ func (r *DeadPoolReaper) requeueInProgressJobs(poolID string, jobTypes []string)
 	}
 	scriptArgs = append(scriptArgs, poolID) // ARGV[1]
 
-	conn := r.pool.Get()
+	conn := r.ctx.Redis().Get()
 	defer conn.Close()
 
 	// Keep moving jobs until all queues are empty
@@ -160,8 +181,9 @@ func (r *DeadPoolReaper) requeueInProgressJobs(poolID string, jobTypes []string)
 	}
 }
 
-func (r *DeadPoolReaper) findDeadPools() (map[string][]string, error) {
-	conn := r.pool.Get()
+func (r *DeadPoolReaper) findDeadPools() (map[string]*deadPoolInfo, error) {
+	conn := r.ctx.Redis().Get()
+
 	defer conn.Close()
 
 	workerPoolsKey := models.RedisKey2Pools(r.namespace)
@@ -171,13 +193,13 @@ func (r *DeadPoolReaper) findDeadPools() (map[string][]string, error) {
 		return nil, err
 	}
 
-	deadPools := map[string][]string{}
+	deadPools := map[string]*deadPoolInfo{}
 	for _, workerPoolID := range workerPoolIDs {
 		heartbeatKey := models.RedisKey2Heartbeat(r.namespace, workerPoolID)
 		heartbeatAt, err := redis.Int64(conn.Do("HGET", heartbeatKey, config.HeartbeatBeat))
 		if err == redis.ErrNil {
 			// heartbeat expired, save dead pool and use cur set of jobs from reaper
-			deadPools[workerPoolID] = []string{}
+			deadPools[workerPoolID] = &deadPoolInfo{}
 			continue
 		}
 		if err != nil {
@@ -189,6 +211,8 @@ func (r *DeadPoolReaper) findDeadPools() (map[string][]string, error) {
 			continue
 		}
 
+		deadInfo := &deadPoolInfo{}
+
 		jobTypesList, err := redis.String(conn.Do("HGET", heartbeatKey, config.HeartbeatJobNames))
 		if err == redis.ErrNil {
 			continue
@@ -196,8 +220,28 @@ func (r *DeadPoolReaper) findDeadPools() (map[string][]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		deadInfo.jobTypes = strings.Split(jobTypesList, ",")
 
-		deadPools[workerPoolID] = strings.Split(jobTypesList, ",")
+		kind, err := redis.String(conn.Do("HGET", heartbeatKey, config.HeartbeatKind))
+		if err == redis.ErrNil {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if kind == config.PoolKindWorker {
+			workerIds, err := redis.String(conn.Do("HGET", heartbeatKey, config.HeartbeatExecutorIds))
+			r.ctx.If("dead worker ids %s found for %s", workerIds, heartbeatKey)
+			if err == redis.ErrNil {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			deadInfo.workerIds = strings.Split(workerIds, ",")
+		}
+
+		deadPools[workerPoolID] = deadInfo
 	}
 
 	return deadPools, nil

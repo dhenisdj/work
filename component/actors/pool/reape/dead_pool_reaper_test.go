@@ -5,9 +5,9 @@ import (
 	pool2 "github.com/dhenisdj/scheduler/component/actors/pool"
 	"github.com/dhenisdj/scheduler/component/actors/pool/heartbeat"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/context"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"testing"
 	"time"
@@ -56,10 +56,11 @@ func TestDeadPoolReaper(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test getting dead pool
-	reaper := NewDeadPoolReaper(context.New(), ns, pool, []string{})
+	reaper := NewDeadPoolReaper(context.New("test_sg", true), ns, []string{})
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
-	assert.Equal(t, map[string][]string{"2": {"type1", "type2"}, "3": {"type1", "type2"}}, deadPools)
+
+	assert.Equal(t, map[string]*deadPoolInfo{"2": {[]string{"type1", "type2"}, []string{}}, "3": {[]string{"type1", "type2"}, []string{}}}, deadPools)
 
 	// Test requeueing jobs
 	_, err = conn.Do("lpush", models.RedisKey2JobInProgress(ns, "2", "type1"), "foo")
@@ -135,10 +136,10 @@ func TestDeadPoolReaperNoHeartbeat(t *testing.T) {
 	assert.EqualValues(t, 3, numPools)
 
 	// Test getting dead pool ids
-	reaper := NewDeadPoolReaper(context.New(), ns, pool, []string{"type1"})
+	reaper := NewDeadPoolReaper(context.New("test_sg", true), ns, []string{"type1"})
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
-	assert.Equal(t, map[string][]string{"1": {}, "2": {}, "3": {}}, deadPools)
+	assert.Equal(t, map[string]*deadPoolInfo{"1": {}, "2": {}, "3": {}}, deadPools)
 
 	// Test requeueing jobs
 	_, err = conn.Do("lpush", models.RedisKey2JobInProgress(ns, "2", "type1"), "foo")
@@ -218,10 +219,10 @@ func TestDeadPoolReaperNoJobTypes(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test getting dead pool
-	reaper := NewDeadPoolReaper(context.New(), ns, pool, []string{})
+	reaper := NewDeadPoolReaper(context.New("test_sg", true), ns, []string{})
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
-	assert.Equal(t, map[string][]string{"2": {"type1", "type2"}}, deadPools)
+	assert.Equal(t, map[string]*deadPoolInfo{"2": {[]string{"type1", "type2"}, []string{}}}, deadPools)
 
 	// Test requeueing jobs
 	_, err = conn.Do("lpush", models.RedisKey2JobInProgress(ns, "1", "type1"), "foo")
@@ -280,7 +281,7 @@ func TestDeadPoolReaperWithWorkerPools(t *testing.T) {
 	assert.NoError(t, err)
 	jobTypes := map[string]*task.JobType{"job1": nil}
 	concurrences, _ := json.Marshal(map[string]int{"job1": 1})
-	staleHeart := heartbeat.NewPoolHeartbeater(context.New(), ns, "", stalePoolID, pool, jobTypes, concurrences, []string{"id1"})
+	staleHeart := heartbeat.NewPoolHeartbeater(context.New("test_sg", true), ns, "", stalePoolID, jobTypes, concurrences, []string{"id1"})
 	staleHeart.Start()
 
 	// should have 1 stale task and empty task queue
@@ -289,7 +290,7 @@ func TestDeadPoolReaperWithWorkerPools(t *testing.T) {
 
 	// setup a work pool and start the reaper, which should restart the stale task above
 	wp := setupTestWorkerPool(pool, ns, job1, task.JobOptions{Priority: 1})
-	wp.DeadPoolReaper = NewDeadPoolReaper(context.New(), wp.Namespace, wp.Redis, []string{"job1"})
+	wp.DeadPoolReaper = NewDeadPoolReaper(context.New("test_sg", true), wp.Namespace, []string{"job1"})
 	// sleep long enough for staleJob to be considered dead
 	time.Sleep(expectedDeadTime * 2)
 
@@ -330,7 +331,7 @@ func TestDeadPoolReaperCleanStaleLocks(t *testing.T) {
 	err = conn.Flush()
 	assert.NoError(t, err)
 
-	reaper := NewDeadPoolReaper(context.New(), ns, pool, jobNames)
+	reaper := NewDeadPoolReaper(context.New("test_sg", true), ns, jobNames)
 	// clean lock info for workerPoolID1
 	reaper.cleanStaleLockInfo(workerPoolID1, jobNames)
 	assert.NoError(t, err)
@@ -356,8 +357,7 @@ func setupTestWorkerPool(pool *redis.Pool, namespace, jobName string, jobOpts ta
 	helper.DeleteQueue(pool, namespace, jobName)
 	helper.DeleteRetryAndDead(pool, namespace)
 	helper.DeletePausedAndLockedKeys(namespace, jobName, pool)
-	configuration := config.InitConfig("test")
-	wp := pool2.NewWorkerPool(context.New(), "test", *configuration.Spark.Executor, pool)
+	wp := pool2.NewWorkerPool(context.New("test_sg", true))
 	wp.JobWithOptions(jobName, jobOpts, (*helper.TestContext).SleepyJob)
 	// reset the backoff times to help with testing
 	config.SleepBackoffsInMilliseconds = []int64{10, 10, 10, 10, 10}

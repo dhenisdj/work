@@ -178,7 +178,13 @@ func RedisKey2JobConcurrency(namespace, jobName string) string {
 // RedisKey2Observation Example am:obs:7cf6c1f3171a
 // <namespace>:obs:<workerID>
 func RedisKey2Observation(namespace, workerID string) string {
-	return RedisNamespacePrefix(namespace) + "obs:" + workerID
+	return RedisKeyPrefix(namespace) + "obs:" + workerID
+}
+
+// RedisKey2JobSessionId Example am:obs:7cf6c1f3171a
+// <namespace>:bid:<jobID>
+func RedisKey2JobSessionId(namespace, jobID string) string {
+	return RedisKeyPrefix(namespace) + "sid:" + jobID
 }
 
 func RedisKeyUniqueJob(namespace, jobName string, args map[string]interface{}) (string, error) {
@@ -482,3 +488,27 @@ else
 end
 return 'dup'
 `
+
+var RedisLuaCanPollJob = fmt.Sprintf(`
+local res, lockKey, limitKey, lockKeyExist, limitKeyExist, active, limit
+local keylen = #KEYS
+
+for i=1,keylen,%d do
+  lockKey = KEYS[i]
+  limitKey = KEYS[i+1]
+
+  lockKeyExist = tonumber(redis.call('exists', lockKey))
+  limitKeyExist = tonumber(redis.call('exists', limitKey))
+  
+  if (lockKeyExist == 0) and (limitKeyExist == 1) then
+    return true
+  end
+  if (lockKeyExist == 1) and (limitKeyExist == 1) then
+    active = tonumber(redis.call('get', lockKey))
+    limit = tonumber(redis.call('get', limitKey))
+    if active < limit then
+      return true
+    end
+  end
+end
+return false`, config.CheckKeysIsJobReachLimit)

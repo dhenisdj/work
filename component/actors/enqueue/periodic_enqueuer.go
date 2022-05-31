@@ -3,8 +3,8 @@ package enqueue
 import (
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
 	"math/rand"
 	"time"
@@ -18,7 +18,7 @@ const (
 )
 
 type PeriodicEnqueuer struct {
-	ctx                   *context.Context
+	ctx                   context.Context
 	namespace             string
 	pool                  *redis.Pool
 	periodicJobs          []*task.PeriodicJob
@@ -27,7 +27,7 @@ type PeriodicEnqueuer struct {
 	doneStoppingChan      chan struct{}
 }
 
-func NewPeriodicEnqueuer(ctx *context.Context, namespace string, pool *redis.Pool, periodicJobs []*task.PeriodicJob) *PeriodicEnqueuer {
+func NewPeriodicEnqueuer(ctx context.Context, namespace string, pool *redis.Pool, periodicJobs []*task.PeriodicJob) *PeriodicEnqueuer {
 	return &PeriodicEnqueuer{
 		ctx:              ctx,
 		namespace:        namespace,

@@ -13,8 +13,8 @@ type FetcherGroup struct {
 	Fetchers  []*Fetcher
 }
 
-func NewFetcherGroup(env, namespace, poolID, appKey, appSecret, callBack string, opts ...group.GroupOption) *FetcherGroup {
-	g := group.NewGroup(env, namespace, poolID)
+func NewFetcherGroup(env, namespace, poolID, groupName, appKey, appSecret, callBack string, opts ...group.GroupOption) *FetcherGroup {
+	g := group.NewGroup(env, namespace, poolID, groupName)
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -40,6 +40,7 @@ func (fg *FetcherGroup) Start(uri string) {
 	for _, f := range fg.Fetchers {
 		go f.start(uri)
 	}
+	fg.Ctx.If("fetcher group %s for %s started!", fg.GroupID, fg.GroupName)
 }
 
 // Stop stops the workers and associated processes.

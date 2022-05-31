@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/dhenisdj/scheduler/component/actors/enqueue"
-	context "github.com/dhenisdj/scheduler/component/common/context"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/config"
 	"os"
 	"time"
@@ -25,8 +25,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	pool := newPool(*redisHostPort)
-
 	var args map[string]interface{}
 	err := json.Unmarshal([]byte(*jobArgs), &args)
 	if err != nil {
@@ -34,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	en := enqueue.NewEnqueuer(context.New(), config.SchedulerNamespace, "", "", pool)
+	en := enqueue.NewEnqueuer(context.New("test_sg", true), config.SchedulerNamespace, "", "")
 	en.Enqueue(*jobName, args)
 }
 

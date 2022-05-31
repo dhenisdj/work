@@ -59,10 +59,28 @@ am:
 airflow:
   seatalk: https://openapi.seatalk.io/webhook/group/WZ1OiychQyWrczdEwt6m3Q
 
+redis:
+  network: tcp
+  addr: localhost:6379
+  maxActive: 20
+  maxIdle: 20
+  idleTimeoutSecond: 240
+
 spark:
   jars:
     - hdfs://R2/projects/sztoc_audiencemanager/jars/aws-java-sdk-bundle-1.11.375.jar
     - hdfs://R2/projects/sztoc_audiencemanager/jars/hadoop-aws-3.2.0-sdi-001.jar
+  file: hdfs://R2/projects/sztoc_audiencemanager/executable/test/%s/run_app.py
+  apps: |-
+    {
+      "FilterAudienceUsers": "am_audience_filter",
+      "SyncDistributionCrm": "am_distribution_crm",
+      "DistributeIncrCalc": "am_distribution_incremental",
+      "SyncDistributionCommon": "am_distribution_referral",
+      "MergeFiles": "am_merge_files",
+      "UpdateAttribute": "am_attribute_update",
+      "SyncAudienceRecordHive": "am_sync_analytical_ma"
+    }
   pyFiles:
     - hdfs://R2/projects/sztoc_audiencemanager/executable/live/sg/amengine-0.1-py3.9.egg
   archives:
@@ -78,6 +96,26 @@ spark:
       "spark.executorEnv.PYSPARK_DRIVER_PYTHON": "./env/bin/python",
       "spark.dynamicAllocation.enabled": "false"
     }
+  livy:
+    retry: 3
+    rest:
+      protocol: http
+      url: livy-rest.data-infra.shopee.io
+      single:
+        create: /batches
+        get: /batches/{batchId}
+        delete: /batches/{batchId}
+        logs: /batches/{batchId}/amlogs/{type}?from={start}&size={logSize}
+      interactive:
+        create: /sessions
+        get: /sessions/{interactiveId}
+        delete: /sessions/{interactiveId}
+        logs: /sessions/{interactiveId}/amlogs/{type}?from={start}&size={logSize}
+        execute: /sessions/{interactiveId}/statements
+        query: /sessions/{interactiveId}/statements/{statementId}
+    thrift:
+      host: jdbc:hive2://livy-thrift.data-infra.shopee.io
+      port: 10090
   executor:
     FilterAudienceUsers:
       name: FilterAudienceUsers
@@ -119,8 +157,8 @@ spark:
           - crm
         account:
           crm:
-            name: ""
-            password: ""
+            name: haiping.lai
+            password: bMHhMu4uQs1X
         concurrency:
           crm: 30
         queue:

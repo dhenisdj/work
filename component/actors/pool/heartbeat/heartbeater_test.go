@@ -3,10 +3,10 @@ package heartbeat
 import (
 	"encoding/json"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"testing"
 	"time"
@@ -32,7 +32,7 @@ func TestHeartbeater(t *testing.T) {
 		"bar": 10,
 	})
 
-	heart := NewPoolHeartbeater(context.New(), ns, "", "abcd", pool, jobTypes, concurrences, []string{"ccc", "bbb"})
+	heart := NewPoolHeartbeater(context.New("test_sg", true), ns, "", "abcd", jobTypes, concurrences, []string{"ccc", "bbb"})
 	heart.Start()
 
 	time.Sleep(20 * time.Millisecond)

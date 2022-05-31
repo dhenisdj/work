@@ -5,10 +5,10 @@ import (
 	"github.com/dhenisdj/scheduler/component/actors/enqueue"
 	pool2 "github.com/dhenisdj/scheduler/component/actors/pool"
 	"github.com/dhenisdj/scheduler/component/actors/task"
-	context "github.com/dhenisdj/scheduler/component/common/context"
 	"github.com/dhenisdj/scheduler/component/common/models"
-	"github.com/dhenisdj/scheduler/component/helper"
+	"github.com/dhenisdj/scheduler/component/context"
 	"github.com/dhenisdj/scheduler/component/utils"
+	"github.com/dhenisdj/scheduler/component/utils/helper"
 	"github.com/dhenisdj/scheduler/config"
 	"testing"
 	"time"
@@ -17,27 +17,26 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.New()
+var ctx = context.New("test_sg", true)
 
 func TestClientWorkerPoolHeartbeats(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
-	configuration := config.InitConfig("test")
 
-	wp := pool2.NewWorkerPool(ctx, "test", *configuration.Spark.Executor, pool)
+	wp := pool2.NewWorkerPool(ctx)
 	wp.Job("wat", func(job *task.Job) error { return nil })
 	wp.Job("bob", func(job *task.Job) error { return nil })
 	wp.Start()
 
-	wp2 := pool2.NewWorkerPool(ctx, "test", *configuration.Spark.Executor, pool)
+	wp2 := pool2.NewWorkerPool(ctx)
 	wp2.Job("foo", func(job *task.Job) error { return nil })
 	wp2.Job("bar", func(job *task.Job) error { return nil })
 	wp2.Start()
 
 	time.Sleep(20 * time.Millisecond)
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 
 	hbs, err := client.WorkerPoolHeartbeats()
 	assert.NoError(t, err)
@@ -76,15 +75,14 @@ func TestClientWorkerObservations(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
-	configuration := config.InitConfig("test")
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue("wat", task.Q{"a": 1, "b": 2})
 	assert.Nil(t, err)
 	_, err = enqueuer.Enqueue("foo", task.Q{"a": 3, "b": 4})
 	assert.Nil(t, err)
 
-	wp := pool2.NewWorkerPool(ctx, "test", *configuration.Spark.Executor, pool)
+	wp := pool2.NewWorkerPool(ctx)
 	wp.Job("wat", func(job *task.Job) error {
 		time.Sleep(50 * time.Millisecond)
 		return nil
@@ -97,7 +95,7 @@ func TestClientWorkerObservations(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	observations, err := client.WorkerObservations()
 	assert.NoError(t, err)
 	assert.Equal(t, 10, len(observations))
@@ -146,16 +144,15 @@ func TestClientQueues(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
-	configuration := config.InitConfig("test")
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue("wat", nil)
 	_, err = enqueuer.Enqueue("foo", nil)
 	_, err = enqueuer.Enqueue("zaz", nil)
 
 	// Start a pool to work on it. It's going to work on the queues
 	// side effect of that is knowing which jobs are avail
-	wp := pool2.NewWorkerPool(ctx, "test", *configuration.Spark.Executor, pool)
+	wp := pool2.NewWorkerPool(ctx)
 	wp.Job("wat", func(job *task.Job) error {
 		return nil
 	})
@@ -178,7 +175,7 @@ func TestClientQueues(t *testing.T) {
 	enqueuer.Enqueue("wat", nil)
 
 	utils.SetNowEpochSecondsMock(1425263709)
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	queues, err := client.Queues()
 	assert.NoError(t, err)
 
@@ -199,7 +196,7 @@ func TestClientScheduledJobs(t *testing.T) {
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 
 	utils.SetNowEpochSecondsMock(1425263409)
 	defer utils.ResetNowEpochSecondsMock()
@@ -207,7 +204,7 @@ func TestClientScheduledJobs(t *testing.T) {
 	_, err = enqueuer.EnqueueIn("zaz", 4, task.Q{"a": 3, "b": 4})
 	_, err = enqueuer.EnqueueIn("foo", 2, task.Q{"a": 3, "b": 4})
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.ScheduledJobs(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(jobs))
@@ -246,18 +243,17 @@ func TestClientRetryJobs(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
-	configuration := config.InitConfig("test")
 
 	utils.SetNowEpochSecondsMock(1425263409)
 	defer utils.ResetNowEpochSecondsMock()
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue("wat", task.Q{"a": 1, "b": 2})
 	assert.Nil(t, err)
 
 	utils.SetNowEpochSecondsMock(1425263429)
 
-	wp := pool2.NewWorkerPool(ctx, "test", *configuration.Spark.Executor, pool)
+	wp := pool2.NewWorkerPool(ctx)
 	wp.Job("wat", func(job *task.Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -265,7 +261,7 @@ func TestClientRetryJobs(t *testing.T) {
 	wp.Drain()
 	wp.Stop()
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.RetryJobs(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(jobs))
@@ -286,18 +282,17 @@ func TestClientDeadJobs(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
-	configuration := config.InitConfig("test")
 
 	utils.SetNowEpochSecondsMock(1425263409)
 	defer utils.ResetNowEpochSecondsMock()
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	_, err := enqueuer.Enqueue("wat", task.Q{"a": 1, "b": 2})
 	assert.Nil(t, err)
 
 	utils.SetNowEpochSecondsMock(1425263429)
 
-	wp := pool2.NewWorkerPool(ctx, "test", *configuration.Spark.Executor, pool)
+	wp := pool2.NewWorkerPool(ctx)
 	wp.JobWithOptions("wat", task.JobOptions{Priority: 1, MaxFails: 1}, func(job *task.Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -305,7 +300,7 @@ func TestClientDeadJobs(t *testing.T) {
 	wp.Drain()
 	wp.Stop()
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.DeadJobs(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(jobs))
@@ -349,7 +344,7 @@ func TestClientDeleteDeadJob(t *testing.T) {
 	insertDeadJob(ns, pool, "wat", 12345, 12349)
 	insertDeadJob(ns, pool, "wat", 12345, 12350)
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.DeadJobs(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 4, len(jobs))
@@ -378,7 +373,7 @@ func TestClientRetryDeadJob(t *testing.T) {
 	insertDeadJob(ns, pool, "wat3", 12345, 12349)
 	insertDeadJob(ns, pool, "wat4", 12345, 12350)
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.DeadJobs(1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 4, len(jobs))
@@ -455,7 +450,7 @@ func TestClientRetryDeadJobWithArgs(t *testing.T) {
 		panic(err)
 	}
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	err = client.RetryDeadJob(failAt, job.ID)
 	assert.NoError(t, err)
 
@@ -478,7 +473,7 @@ func TestClientDeleteAllDeadJobs(t *testing.T) {
 	insertDeadJob(ns, pool, "wat", 12345, 12349)
 	insertDeadJob(ns, pool, "wat", 12345, 12350)
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.DeadJobs(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 4, len(jobs))
@@ -506,7 +501,7 @@ func TestClientRetryAllDeadJobs(t *testing.T) {
 	insertDeadJob(ns, pool, "wat3", 12345, 12349)
 	insertDeadJob(ns, pool, "wat4", 12345, 12350)
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.DeadJobs(1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 4, len(jobs))
@@ -601,7 +596,7 @@ func TestClientRetryAllDeadJobsBig(t *testing.T) {
 		panic(err.Error())
 	}
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	_, count, err := client.DeadJobs(1)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 10001, count)
@@ -626,12 +621,12 @@ func TestClientDeleteScheduledJob(t *testing.T) {
 	helper.CleanKeyspace(ns, pool)
 
 	// Delete an invalid task. Make sure we get error
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	err := client.DeleteScheduledJob(3, "bob")
 	assert.Equal(t, ErrNotDeleted, err)
 
 	// Schedule a task. Delete it.
-	enq := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enq := enqueue.NewEnqueuer(ctx, ns, "", "")
 	j, err := enq.EnqueueIn("foo", 10, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, j)
@@ -647,12 +642,12 @@ func TestClientDeleteScheduledUniqueJob(t *testing.T) {
 	helper.CleanKeyspace(ns, pool)
 
 	// Schedule a unique task. Delete it. Ensure we can component it again.
-	enq := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enq := enqueue.NewEnqueuer(ctx, ns, "", "")
 	j, err := enq.EnqueueUniqueIn("foo", 10, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, j)
 
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	err = client.DeleteScheduledJob(j.RunAt, j.ID)
 	assert.NoError(t, err)
 	assert.EqualValues(t, 0, helper.ZsetSize(pool, models.RedisKey2JobScheduled(ns)))
@@ -666,18 +661,17 @@ func TestClientDeleteRetryJob(t *testing.T) {
 	pool := helper.NewTestPool(":6379")
 	ns := config.SchedulerNamespace
 	helper.CleanKeyspace(ns, pool)
-	configuration := config.InitConfig("test")
 
 	utils.SetNowEpochSecondsMock(1425263409)
 	defer utils.ResetNowEpochSecondsMock()
 
-	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "", pool)
+	enqueuer := enqueue.NewEnqueuer(ctx, ns, "", "")
 	j, err := enqueuer.Enqueue("wat", task.Q{"a": 1, "b": 2})
 	assert.Nil(t, err)
 
 	utils.SetNowEpochSecondsMock(1425263429)
 
-	wp := pool2.NewWorkerPool(ctx, "test", *configuration.Spark.Executor, pool)
+	wp := pool2.NewWorkerPool(ctx)
 	wp.Job("wat", func(job *task.Job) error {
 		return fmt.Errorf("ohno")
 	})
@@ -686,7 +680,7 @@ func TestClientDeleteRetryJob(t *testing.T) {
 	wp.Stop()
 
 	// Ok so now we have a retry task
-	client := NewClient(ctx, ns, pool)
+	client := NewClient(ctx, ns)
 	jobs, count, err := client.RetryJobs(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(jobs))
